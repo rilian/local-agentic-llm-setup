@@ -1,0 +1,30 @@
+{
+  "roo-cline.allowedCommands": [
+    "npm",
+    "npx",
+    "node",
+    "yarn",
+    "pnpm",
+    "bash",
+    "sh",
+    "git",
+    "curl",
+    "mkdir",
+    "cp",
+    "mv",
+    "ls",
+    "cat",
+    "chmod",
+    "python",
+    "python3",
+    "pip",
+    "tsc",
+    "vite",
+    "next"
+  ],
+  "roo-cline.deniedCommands": [
+    "sudo",
+    "rm -rf",
+    "rm -fr"
+  ]
+}

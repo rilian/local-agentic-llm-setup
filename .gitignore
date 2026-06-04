@@ -1,0 +1,4 @@
+config/models.env
+.env
+*.pem
+.DS_Store
