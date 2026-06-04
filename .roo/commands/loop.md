@@ -6,7 +6,7 @@ mode: code
 
 # LOOP MODE — work until done
 
-You are in **/loop** mode. Keep working until the task is genuinely complete.
+You are in **/loop** mode (Zoo Code). Keep working until the task is genuinely complete.
 
 ## Task
 
@@ -14,6 +14,7 @@ $ARGUMENTS
 
 ## Rules
 
+0. **Approval-only.** The user approves every file edit and shell command — wait for approval before proceeding.
 1. Do not stop early. Plan → act → verify → repeat.
 2. Run shell commands yourself: `npm install`, `npm run dev` (background), `npm test`, bash, git.
 3. Track progress in `LOOP_PROGRESS.md` when useful.

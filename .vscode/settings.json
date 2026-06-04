@@ -1,4 +1,5 @@
 {
+  // Zoo Code (Roo Code fork) — settings keys are still roo-cline.*
   "roo-cline.allowedCommands": [
     "npm",
     "npx",

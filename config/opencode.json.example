@@ -19,6 +19,12 @@
           "tools": true,
           "context_length": 32768,
           "max_tokens": 8192
+        },
+        "qwen3-coder-64k": {
+          "name": "Qwen3 Coder 30B (64k ctx)",
+          "tools": true,
+          "context_length": 65536,
+          "max_tokens": 8192
         }
       }
     }

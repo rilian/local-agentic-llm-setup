@@ -8,6 +8,7 @@ You are in **loop mode**. The user wants sustained, deep work on a long task —
 
 ## Loop rules
 
+0. **Approval-only.** The user approves every file edit and shell command — wait for approval before proceeding.
 1. **Do not stop early.** Keep iterating until the task is genuinely complete.
 2. **Plan → act → verify → repeat.** Read files, edit code, run shell commands (`npm install`, `npm run build`, `npm test`, `npm run dev`, bash scripts).
 3. **Use the shell.** Run commands yourself — the user works terminal-only; you execute npm, git, tests, dev servers.

@@ -1,6 +1,6 @@
 # Full Setup: Local Agentic LLM (Mac M4 Pro)
 
-Terminal-first agent (**OpenCode** + **`./scripts/loop.sh`**). **ChatGPT** for general GUI. **VS Code + Roo Code** is the optional **last step** (manual).
+Terminal-first agent (**OpenCode** + **`./scripts/loop.sh`**). **ChatGPT** for general GUI. **VS Code + Zoo Code** is the optional **last step** (manual).
 
 **Hardware:** MacBook Pro M4 Pro, 24 GB RAM.
 
@@ -12,13 +12,14 @@ Terminal-first agent (**OpenCode** + **`./scripts/loop.sh`**). **ChatGPT** for g
 |------|------|------------|-------|
 | **0** | Install Homebrew | Manual once | Only if not already installed |
 | **1** | Install Ollama + start service | ✅ Yes | `scripts/install.sh` |
-| **2** | Pull coding model (~18 GB) | ✅ Yes, **slow** | 15–30 min download; script waits |
+| **2** | Pull coding model (~18 GB) | ✅ Yes, **~20–30 min** | Mostly download time (~22 min on M4 Pro) |
+| **2b** | Fix `llama-server` (brew) | ✅ Yes | Script installs `llama.cpp` + symlink — **required for GGUF** |
 | **3** | Install OpenCode CLI | ✅ Yes | `scripts/install.sh` |
 | **4** | Wire OpenCode → Ollama | ✅ Yes | Copies `config/opencode.json.example` |
-| **5** | Use terminal agent | You run | `opencode --dangerously-skip-permissions` |
+| **5** | Use terminal agent | You run | `opencode` — approve each action |
 | **6** | `/loop` long tasks | You run | `./scripts/loop.sh "…"` |
 | **7** | Pin model in repo | ✅ Yes | Creates `config/models.env` |
-| **8** | VS Code + Roo Code | ❌ **Manual** | Marketplace + UI clicks — **last step** |
+| **8** | VS Code + Zoo Code | ❌ **Manual** | Marketplace + UI clicks — **last step** |
 
 ### One-command automated setup (Steps 1–4, 7)
 
@@ -41,7 +42,9 @@ An agent (or you) **can** run `./scripts/install.sh` end-to-end. What still need
 
 1. Homebrew absent → install from brew.sh first
 2. Model download → wait (network + disk)
-3. **Step 8** → install Roo Code extension in VS Code by hand
+3. **Step 8** → install Zoo Code extension in VS Code by hand
+
+**Observed on this machine (2026-06-04):** full `install.sh` ~22 min; first Ollama inference ~2 min (model load into RAM).
 
 ---
 
@@ -49,7 +52,7 @@ An agent (or you) **can** run `./scripts/install.sh` end-to-end. What still need
 
 ```
   Terminal (primary)                VS Code (optional, Step 8)
-  ├── opencode                      └── Roo Code → same Ollama API
+  ├── opencode                      └── Zoo Code → same Ollama API
   └── ./scripts/loop.sh
             │
             ▼
@@ -110,29 +113,71 @@ chmod +x scripts/loop.sh
 
 </details>
 
-### Verify Steps 1–7
+### Verify Steps 1–7 (fast — no model load)
+
+```bash
+./scripts/verify.sh
+```
+
+This checks Ollama API, `llama-server` binary, models, and a **10-second runtime probe** (catches `llama-server binary not found` without waiting for the 30B model to load).
+
+Optional full inference test (~2 min first load):
+
+```bash
+VERIFY_INFERENCE=1 ./scripts/verify.sh
+```
+
+Manual checks:
 
 ```bash
 curl -s http://127.0.0.1:11434/api/tags | head
 ollama list
 opencode --version
-opencode run --dangerously-skip-permissions "Reply with exactly: setup ok"
-./scripts/loop.sh "Create file SETUP_OK.txt containing ok. Output LOOP_COMPLETE when done."
 ```
 
+If you see `llama-server binary not found`:
+
+```bash
+./scripts/fix-llama-server.sh
+./scripts/verify.sh
+```
+
+Do **not** use `ollama run … "setup ok"` as a quick test — the 30B model takes ~2 min to load on first run. Use `./scripts/verify.sh` instead.
+
 ---
+
+## Approval-only policy
+
+This setup **never** uses `--dangerously-skip-permissions`. You approve every file edit and shell command.
+
+| Tool | How approvals work |
+|------|-------------------|
+| **OpenCode TUI** | Run `opencode` → approve/deny each tool call in the UI |
+| **OpenCode one-shot** | `opencode run -i "…"` → same prompts in split-footer mode |
+| **loop.sh** | Uses `opencode run -i` each iteration — stay at the terminal to approve |
+| **Zoo Code** | Leave **Auto Approve (BRRR)** **off** — approve Read / Write / Execute per action |
+
+Do **not** pass `--dangerously-skip-permissions` and do **not** enable Zoo Code BRRR auto-approve unless you explicitly want to override this policy later.
 
 ## Step 5: Daily terminal use
 
 ```bash
 cd /path/to/your/project
-opencode --dangerously-skip-permissions
+opencode
 ```
 
-One-shot:
+Approve each file edit and shell command when OpenCode asks.
+
+One-shot (interactive — you approve tool use):
 
 ```bash
-opencode run --dangerously-skip-permissions "Run npm test and summarize"
+opencode run -i "Run npm test and summarize"
+```
+
+Chat-only (no tools, no approval needed):
+
+```bash
+opencode run "Explain what this repo does in one paragraph"
 ```
 
 Guided first launch (alternative to manual config):
@@ -150,13 +195,15 @@ ollama launch opencode
 ./scripts/loop.sh --max 40 "larger task"
 ```
 
-Uses [prompts/loop.md](../prompts/loop.md). In VS Code (Step 8), use `/loop` from [.roo/commands/loop.md](../.roo/commands/loop.md).
+Each iteration runs `opencode run -i` — **stay at the terminal** and approve actions as they appear. Uses [prompts/loop.md](../prompts/loop.md). In VS Code (Step 8), use `/loop` from [.roo/commands/loop.md](../.roo/commands/loop.md) and approve each Zoo Code action.
 
 ---
 
-## Step 8: VS Code + Roo Code (manual — do this last)
+## Step 8: VS Code + Zoo Code (manual — do this last)
 
 Do this **after** Steps 1–7 work. Ollama must already be running on `http://127.0.0.1:11434`.
+
+> **Roo Code is sunset (May 2026).** The original Roo Code extension still works but receives no updates. This guide uses **[Zoo Code](https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code)** — a community fork with active development and the same Ollama/local setup. If you already use Roo Code, see the [Roo → Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration). **Alternative:** [Cline](https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev) (where Roo Code originated).
 
 ### 8a. Install VS Code (if needed)
 
@@ -166,19 +213,25 @@ Download from [code.visualstudio.com](https://code.visualstudio.com) or:
 brew install --cask visual-studio-code
 ```
 
-### 8b. Install Roo Code extension (manual)
+### 8b. Install Zoo Code extension (manual)
 
 1. Open **Visual Studio Code**
 2. **Extensions** (`Cmd+Shift+X`)
-3. Search **Roo Code**
-4. Install **Roo Code** (publisher: **RooCodeInc**)
-5. Click the **Roo Code** icon in the left activity bar
+3. Search **Zoo Code**
+4. Install **Zoo Code** (publisher: **Zoo Code Organization**)
+5. Click the **Zoo Code** icon in the left activity bar
 
-Cannot be automated — VS Code Marketplace requires a click in the editor.
+CLI install (optional):
 
-### 8c. Connect Roo Code to your local Ollama
+```bash
+code --install-extension ZooCodeOrganization.zoo-code
+```
 
-1. Open Roo Code panel → click the **gear icon** (Provider Settings)
+Cannot be automated — VS Code Marketplace requires a click in the editor (unless using CLI above).
+
+### 8c. Connect Zoo Code to your local Ollama
+
+1. Open Zoo Code panel → click the **gear icon** (Provider Settings)
 2. Set:
 
    | Setting | Value |
@@ -190,7 +243,7 @@ Cannot be automated — VS Code Marketplace requires a click in the editor.
 3. Click **Save** / close settings
 4. **No API key** required for local Ollama
 
-**Test:** in Roo Code chat, send `What model are you using? Reply in one sentence.`
+**Test:** in Zoo Code chat, send `What model are you using? Reply in one sentence.`
 
 If it errors:
 
@@ -206,21 +259,19 @@ Common fixes:
 - Ollama not running → `brew services start ollama`
 - Use `http://localhost:11434` not `https://`
 
-### 8d. Enable auto-approve for agent work (recommended)
+### 8d. Manual approval (required)
 
-Long tasks need uninterrupted file + shell access:
+Keep **Auto Approve (BRRR) disabled**. Approve each action in the Zoo Code sidebar:
 
-1. Roo Code home → check **Auto Approve** (**BRRR**)
-2. Enable **Read**, **Write**, **Execute**
-3. **Execute requires allowed commands** — open this repo in VS Code so `.vscode/settings.json` loads, **or** add `*` under Settings → Auto Approve → Allowed Commands
+1. When Zoo Code wants to read, write, or run a command → review the diff or command → **Approve** or **Reject**
+2. For shell commands, this repo's `.vscode/settings.json` lists common allowed commands (`npm`, `git`, `bash`, etc.) — Zoo Code still asks before running them unless you later enable auto-approve yourself
+3. Long `/loop` tasks work fine with manual approval; they just take more clicks
 
-This repo's `.vscode/settings.json` pre-allows: `npm`, `npx`, `bash`, `git`, etc.
+### 8e. Use `/loop` in Zoo Code (optional)
 
-### 8e. Use `/loop` in Roo Code (optional)
+Zoo Code uses the same `.roo/commands/` folder as Roo Code (inherited from the fork). Open a workspace that contains `.roo/commands/loop.md` (this repo, or copy that file to your project).
 
-Open a workspace that contains `.roo/commands/loop.md` (this repo, or copy that file to your project).
-
-1. Roo Code chat → type `/`
+1. Zoo Code chat → type `/`
 2. Select **`loop`**
 3. Example:
 
@@ -228,13 +279,13 @@ Open a workspace that contains `.roo/commands/loop.md` (this repo, or copy that 
 /loop Add unit tests for the auth module, run npm test, fix failures. LOOP_COMPLETE when done.
 ```
 
-Enable BRRR (8d) so it won't stop for every file edit and `npm` command.
+Approve each file edit and `npm` command when Zoo Code prompts.
 
 ### Step 8 verification
 
-- [ ] Roo Code responds using local model (no cloud API key)
-- [ ] `ollama list` model name matches Roo **Model ID**
-- [ ] Agent can edit a file from Roo sidebar
+- [ ] Zoo Code responds using local model (no cloud API key)
+- [ ] `ollama list` model name matches Zoo Code **Model ID**
+- [ ] Agent can edit a file from Zoo Code sidebar
 - [ ] (Optional) `/loop` appears in slash command list
 
 ---
@@ -249,7 +300,7 @@ ollama rm old-tag
 Update:
 
 - `~/.config/opencode/opencode.json` → `"model"` field
-- Roo Code settings → Model ID
+- Zoo Code settings → Model ID
 - `config/models.env`
 
 ---
@@ -258,11 +309,37 @@ Update:
 
 | Problem | Fix |
 |---------|-----|
+| `llama-server binary not found` | `./scripts/fix-llama-server.sh` then `./scripts/verify.sh` |
 | Ollama not running | `brew services start ollama` |
-| OpenCode permission prompts | `--dangerously-skip-permissions` |
-| Roo can't connect | Check Base URL + model ID vs `ollama list` |
-| Roo asks approve every `npm` | Enable Execute + add allowed commands (Step 8d) |
+| First inference ~2 min | Normal — 30B model loading into RAM |
+| OpenCode permission prompts | Expected — approve or deny in the UI; never use `--dangerously-skip-permissions` |
+| Zoo Code can't connect | Check Base URL + model ID vs `ollama list` |
+| Zoo Code asks approve every action | Expected with approval-only policy (Step 8d) |
 | Loop stops early | `./scripts/loop.sh --max 50 "…"` or `--continue` in opencode |
+
+### `llama-server binary not found` (Homebrew Ollama 0.30+)
+
+Homebrew Ollama does not bundle `llama-server`; GGUF models fail without this fix.
+
+**One command:**
+
+```bash
+./scripts/fix-llama-server.sh
+./scripts/verify.sh
+```
+
+**Manual equivalent:**
+
+```bash
+brew install llama.cpp
+OLLAMA_VER=$(ollama --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+BREW_PREFIX=$(brew --prefix)
+mkdir -p "${BREW_PREFIX}/Cellar/ollama/${OLLAMA_VER}/libexec/lib/ollama"
+ln -sf "$(which llama-server)" "${BREW_PREFIX}/Cellar/ollama/${OLLAMA_VER}/libexec/lib/ollama/llama-server"
+brew services restart ollama   # required — daemon must restart to pick up the binary
+```
+
+Re-run after `brew upgrade ollama`. **Alternative:** use [Ollama.app](https://ollama.com/download) instead of brew.
 
 ---
 
@@ -271,13 +348,15 @@ Update:
 | Item | Value |
 |------|-------|
 | Auto install | `./scripts/install.sh` |
+| Fast verify | `./scripts/verify.sh` |
+| Fix llama-server | `./scripts/fix-llama-server.sh` |
 | Ollama API | `http://127.0.0.1:11434` |
-| Terminal agent | `opencode --dangerously-skip-permissions` |
+| Terminal agent | `opencode` (approve each action) |
 | Long task (terminal) | `./scripts/loop.sh "…"` |
-| Long task (VS Code) | `/loop …` in Roo Code |
+| Long task (VS Code) | `/loop …` in Zoo Code |
 | OpenCode config | `~/.config/opencode/opencode.json` |
-| Roo allowed cmds | `.vscode/settings.json` |
-| Last manual step | **Step 8 — Roo Code extension** |
+| Zoo Code allowed cmds | `.vscode/settings.json` (`roo-cline.*` keys) |
+| Last manual step | **Step 8 — Zoo Code extension** |
 
 ---
 
@@ -285,6 +364,6 @@ Update:
 
 - [ ] Step 0: Homebrew installed
 - [ ] Steps 1–7: `./scripts/install.sh` succeeded
-- [ ] Terminal verify: `opencode run …` and `./scripts/loop.sh …`
-- [ ] **Step 8:** Roo Code installed + connected to Ollama
+- [ ] Fast verify: `./scripts/verify.sh`
+- [ ] **Step 8:** Zoo Code installed + connected to Ollama
 - [ ] [GOAL.md](../GOAL.md) success criteria

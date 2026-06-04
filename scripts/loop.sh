@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Long-running agent loop — terminal equivalent of /loop
+# Approval-only: each file edit and shell command requires your OK in the OpenCode UI.
 # Usage: ./scripts/loop.sh [--max N] [--model provider/model] "your task"
 
 set -euo pipefail
@@ -52,6 +53,8 @@ fi
 echo "=== Loop start (max $MAX_ITERATIONS iterations) ==="
 echo "Task: $TASK"
 echo ""
+echo "Approval-only: approve each action in the OpenCode prompt (never use --dangerously-skip-permissions)."
+echo ""
 
 for ((i=1; i<=MAX_ITERATIONS; i++)); do
   echo "--- Iteration $i / $MAX_ITERATIONS ---"
@@ -66,7 +69,7 @@ for ((i=1; i<=MAX_ITERATIONS; i++)); do
 
   OUTPUT=$(mktemp)
   set +e
-  opencode run --dangerously-skip-permissions "${MODEL_ARGS[@]}" "${CONTINUE_ARGS[@]}" "$PROMPT" 2>&1 | tee "$OUTPUT"
+  opencode run -i "${MODEL_ARGS[@]}" "${CONTINUE_ARGS[@]}" "$PROMPT" 2>&1 | tee "$OUTPUT"
   EXIT_CODE=${PIPESTATUS[0]}
   set -e
 

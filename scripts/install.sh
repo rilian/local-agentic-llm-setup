@@ -49,6 +49,9 @@ for i in {1..30}; do
 done
 curl -sf http://127.0.0.1:11434/api/tags >/dev/null || die "Ollama API not responding on :11434"
 
+# --- Homebrew Ollama 0.30+ needs llama-server for GGUF models ---
+"$REPO_ROOT/scripts/fix-llama-server.sh"
+
 # --- Pull models ---
 log "Pulling primary model: $PRIMARY_MODEL (this may take a while)..."
 ollama pull "$PRIMARY_MODEL"
@@ -104,6 +107,12 @@ if [[ ! -f "$REPO_ROOT/config/models.env" ]]; then
 fi
 
 chmod +x "$REPO_ROOT/scripts/loop.sh" 2>/dev/null || true
+chmod +x "$REPO_ROOT/scripts/fix-llama-server.sh" "$REPO_ROOT/scripts/verify.sh" 2>/dev/null || true
+
+log "Running fast verification (no model load)..."
+if ! "$REPO_ROOT/scripts/verify.sh"; then
+  echo "WARNING: verification failed — try: ./scripts/fix-llama-server.sh && ./scripts/verify.sh" >&2
+fi
 
 log "Optional: run 'ollama launch opencode' for guided first launch"
 
@@ -117,11 +126,14 @@ echo "  Models:    $(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' | t
 echo "  OpenCode:  $(command -v opencode || echo 'not found')"
 echo "  Config:    ~/.config/opencode/opencode.json"
 echo ""
-echo " Verify terminal agent:"
-echo "   opencode run --dangerously-skip-permissions \"say hello\""
+echo " Verify setup (fast, ~10s):"
+echo "   ./scripts/verify.sh"
+echo ""
+echo " Verify full inference (slow, ~2 min first load):"
+echo "   VERIFY_INFERENCE=1 ./scripts/verify.sh"
 echo ""
 echo " Verify /loop:"
 echo "   cd $REPO_ROOT && ./scripts/loop.sh \"create LOOP_TEST.txt and output LOOP_COMPLETE\""
 echo ""
-echo " LAST STEP (manual): VS Code + Roo Code — see docs/SETUP.md Step 8"
+echo " LAST STEP (manual): VS Code + Zoo Code — see docs/SETUP.md Step 8"
 echo "=============================================="
