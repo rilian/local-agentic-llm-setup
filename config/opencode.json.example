@@ -32,18 +32,87 @@
       }
     }
   },
+  "mcp": {
+    "foundry": {
+      "type": "remote",
+      "enabled": false,
+      "url": "https://proxet.palantirfoundry.com/mcp/third-party-application/ri.third-party-applications.main.application.YOUR_APP_ID",
+      "headers": {
+        "Authorization": "Bearer {env:FOUNDRY_MCP_TOKEN}",
+        "Accept": "application/json, text/event-stream"
+      }
+    },
+    "github": {
+      "type": "local",
+      "enabled": false,
+      "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
+      "environment": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "{env:GITHUB_PERSONAL_ACCESS_TOKEN}"
+      }
+    },
+    "context7": {
+      "type": "remote",
+      "enabled": false,
+      "url": "https://mcp.context7.com/mcp",
+      "headers": {
+        "CONTEXT7_API_KEY": "{env:CONTEXT7_API_KEY}"
+      }
+    },
+    "sentry": {
+      "type": "remote",
+      "enabled": false,
+      "url": "https://mcp.sentry.dev/mcp",
+      "oauth": {}
+    }
+  },
   "permission": {
     "read": "allow",
     "grep": "allow",
     "glob": "allow",
     "list": "allow",
-    "webfetch": "allow",
-    "websearch": "allow",
     "task": "allow",
-    "bash": "ask",
+    "webfetch": "ask",
+    "websearch": "ask",
+    "tool": {
+      "edit": "ask"
+    },
     "edit": "ask",
     "write": "ask",
-    "apply_patch": "ask"
+    "apply_patch": "ask",
+    "bash": {
+      "*": "ask",
+      "which *": "allow",
+      "opencode *": "allow",
+      "ls *": "allow",
+      "pwd": "allow",
+      "cd *": "allow",
+      "find *": "allow",
+      "tree *": "allow",
+      "cat *": "allow",
+      "echo *": "allow",
+      "head *": "allow",
+      "tail *": "allow",
+      "wc *": "allow",
+      "grep *": "allow",
+      "rg *": "allow",
+      "git status *": "allow",
+      "git diff *": "allow",
+      "git log *": "allow",
+      "git show *": "allow",
+      "git branch *": "allow",
+      "pytest *": "allow",
+      "python3 *": "ask",
+      "node *": "ask",
+      "nvm install *": "ask",
+      "npm run test *": "allow",
+      "make test *": "allow",
+      "git push*": "ask",
+      "git commit*": "ask",
+      "npm publish*": "deny",
+      "docker push*": "deny",
+      "rm *": "deny",
+      "sudo *": "deny"
+    }
   },
   "agent": {
     "build": {

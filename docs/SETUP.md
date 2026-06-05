@@ -274,7 +274,7 @@ Official reference: [OpenCode MCP docs](https://open-code.ai/en/docs/mcp-servers
 | **Global** (all projects) | `~/.config/opencode/opencode.json` |
 | **Project** (one repo) | `./opencode.json` in project root |
 
-Merge an `mcp` block into your existing config, or copy snippets from [config/opencode.mcp.example.json](../config/opencode.mcp.example.json).
+MCP examples (Foundry, GitHub, Context7, Sentry) are in [config/opencode.json.example](../config/opencode.json.example) under `"mcp"` — copy the block you need into global or project config and set `"enabled": true`.
 
 ### Option A — Interactive wizard (easiest)
 
@@ -596,8 +596,7 @@ Re-run after `brew upgrade ollama`. **Alternative:** use [Ollama.app](https://ol
 | Fast session | `opencode --model ollama/qwen3-coder:14b` |
 | Switch model (TUI) | `/models` or `Ctrl+x m` |
 | Long task | `./scripts/loop.sh "…"` |
-| OpenCode config | `~/.config/opencode/opencode.json` |
-| MCP example config | `config/opencode.mcp.example.json` |
+| OpenCode config | `~/.config/opencode/opencode.json` · [config/opencode.json.example](../config/opencode.json.example) |
 | MCP commands | `opencode mcp add` · `opencode mcp list` |
 | Optional Zoo Code | [setup-zoocode.md](setup-zoocode.md) |
 
