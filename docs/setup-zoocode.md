@@ -108,7 +108,7 @@ Typical on the **first request** when the model is cold (~1 min load) plus Archi
 
 **Quick test** (after pre-warm, Ask mode): `Reply in one sentence: what model are you?`
 
-**Faster model in Zoo:** `qwen3-coder:14b` (`PULL_FAST=1 ./scripts/install.sh` pulls it).
+**Faster model in Zoo:** `qwen3-coder:14b` (installed by `./scripts/install.sh`).
 
 ---
 

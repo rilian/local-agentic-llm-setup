@@ -16,7 +16,7 @@ Optional VS Code sidebar: [docs/setup-zoocode.md](docs/setup-zoocode.md) — not
 |------|------|------------|-----|
 | 0 | Homebrew | Manual once | [brew.sh](https://brew.sh) if missing |
 | 1 | Ollama + service | **Yes** | `./scripts/install.sh` |
-| 2 | Download model (~18 GB) | **Yes** (slow) | `install.sh` — ~22 min observed |
+| 2 | Download models (30b + 14b) | **Yes** (slow) | `install.sh` |
 | 2b | `llama-server` fix | **Yes** | built into `install.sh` |
 | 2c | Ollama context 32k | **Yes** | built into `install.sh` |
 | 3 | OpenCode CLI | **Yes** | `install.sh` |
@@ -38,6 +38,7 @@ chmod +x scripts/install.sh scripts/loop.sh
 | `./scripts/install.sh --verify` | Verify (~15s) |
 | `./scripts/install.sh --repair` | Re-apply fixes |
 | `./scripts/install.sh --upgrade` | Upgrade stack |
+| `./scripts/install.sh --upgrade-models` | Re-pull Qwen models |
 | `./scripts/install.sh --check` | Check for updates |
 
 ---
@@ -56,9 +57,7 @@ chmod +x scripts/install.sh scripts/loop.sh
 
 MacBook Pro M4 Pro, 24 GB RAM, ~296 GB free disk.
 
-**Primary model:** `qwen3-coder:30b` at **32k context** (`OLLAMA_CONTEXT_LENGTH=32768`)
-
-Optional: `CREATE_64K=1 ./scripts/install.sh` for `qwen3-coder-64k` (65536 — tight on 24 GB RAM).
+**Primary model:** `qwen3-coder:30b` at **32k context** · **Fast model:** `qwen3-coder:14b` (both installed by `install.sh`)
 
 Full guide: **[docs/SETUP.md](docs/SETUP.md)**
 

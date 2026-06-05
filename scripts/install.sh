@@ -5,12 +5,13 @@
 #   ./scripts/install.sh              Full install on a new machine
 #   ./scripts/install.sh --verify     Verify setup (~15s, no model load)
 #   ./scripts/install.sh --upgrade      Upgrade tools + models + re-apply fixes
+#   ./scripts/install.sh --upgrade-models  Re-pull Qwen models only (see docs/UPGRADING.md)
 #   ./scripts/install.sh --check        Check for available upgrades (no changes)
 #   ./scripts/install.sh --repair       Re-apply fixes only (llama-server, context, config)
 #
 # Env vars (install / upgrade):
 #   PRIMARY_MODEL=qwen3-coder:30b
-#   PULL_FAST=1          Also pull FAST_MODEL
+#   SKIP_FAST=1        Skip pulling FAST_MODEL (qwen3-coder:14b)
 #   CREATE_64K=1         Optional: create qwen3-coder-64k Modelfile (65536 — tight on 24 GB RAM)
 #   SKIP_MODELS=1        Upgrade: skip ollama pull
 #   SKIP_BREW=1          Upgrade: skip brew upgrades
@@ -24,8 +25,11 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 PRIMARY_MODEL="${PRIMARY_MODEL:-qwen3-coder:30b}"
 FAST_MODEL="${FAST_MODEL:-qwen3-coder:14b}"
+# Official library has no qwen3-coder:14b — pull community build, alias locally
+FAST_MODEL_SOURCE="${FAST_MODEL_SOURCE:-freehuntx/qwen3-coder:14b}"
 CONTEXT_MODEL="${CONTEXT_MODEL:-qwen3-coder-64k}"
-PULL_FAST="${PULL_FAST:-0}"
+PULL_FAST="${PULL_FAST:-}"  # deprecated alias for SKIP_FAST=0
+SKIP_FAST="${SKIP_FAST:-0}"
 CREATE_64K="${CREATE_64K:-0}"
 SKIP_MODELS="${SKIP_MODELS:-0}"
 SKIP_BREW="${SKIP_BREW:-0}"
@@ -204,11 +208,18 @@ EOF
 # ---------------------------------------------------------------------------
 
 pull_models() {
+  # PULL_FAST=1 kept for backwards compat
+  [[ "$PULL_FAST" == "1" ]] && SKIP_FAST=0
+
   log "Pulling $PRIMARY_MODEL (may take ~20–30 min)..."
   ollama pull "$PRIMARY_MODEL"
-  if [[ "$PULL_FAST" == "1" ]]; then
-    log "Pulling $FAST_MODEL..."
-    ollama pull "$FAST_MODEL"
+  if [[ "$SKIP_FAST" != "1" ]]; then
+    log "Pulling fast model from $FAST_MODEL_SOURCE (~9 GB)..."
+    ollama pull "$FAST_MODEL_SOURCE"
+    if [[ "$FAST_MODEL" != "$FAST_MODEL_SOURCE" ]]; then
+      log "Creating local alias $FAST_MODEL → $FAST_MODEL_SOURCE"
+      ollama cp "$FAST_MODEL_SOURCE" "$FAST_MODEL"
+    fi
   fi
 }
 
@@ -223,15 +234,24 @@ EOF
 
 update_models_env() {
   local env_file="$REPO_ROOT/config/models.env"
-  local tmp
+  local tmp digest_primary digest_fast digest_fast_src
   tmp="$(mktemp)"
+  model_digest() {
+    ollama list 2>/dev/null | awk -v m="$1" '$1 == m { print $2; exit }'
+  }
+  digest_primary="$(model_digest "$PRIMARY_MODEL")"
+  digest_fast="$(model_digest "$FAST_MODEL")"
+  digest_fast_src="$(model_digest "$FAST_MODEL_SOURCE")"
   if [[ -f "$env_file" ]]; then
-    grep -vE '^(OLLAMA_VERSION|OPENCODE_VERSION|LLAMA_CPP_VERSION|UPGRADED_AT)=' "$env_file" > "$tmp" || true
+    grep -vE '^(OLLAMA_VERSION|OPENCODE_VERSION|LLAMA_CPP_VERSION|UPGRADED_AT|PRIMARY_DIGEST|FAST_DIGEST|FAST_SOURCE_DIGEST)=' "$env_file" > "$tmp" || true
   else
     cp "$REPO_ROOT/config/models.env.example" "$tmp" 2>/dev/null || : > "$tmp"
   fi
   {
     cat "$tmp"
+    echo "PRIMARY_DIGEST=${digest_primary:-unknown}"
+    echo "FAST_DIGEST=${digest_fast:-unknown}"
+    echo "FAST_SOURCE_DIGEST=${digest_fast_src:-unknown}"
     echo "OLLAMA_VERSION=$(ollama --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo unknown)"
     echo "OPENCODE_VERSION=$(opencode --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo unknown)"
     echo "LLAMA_CPP_VERSION=$(brew list --versions llama.cpp 2>/dev/null | awk '{print $2}' || echo unknown)"
@@ -303,6 +323,16 @@ verify_setup() {
   models="$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' | tr '\n' ' ')"
   if [[ -n "$models" ]]; then
     ok "Models: $models"
+    if ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' | grep -qxF "$PRIMARY_MODEL"; then
+      ok "Primary model: $PRIMARY_MODEL"
+    else
+      fail "Primary model missing: $PRIMARY_MODEL"
+    fi
+    if [[ "$SKIP_FAST" != "1" ]] && ! ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' | grep -qxF "$FAST_MODEL"; then
+      fail "Fast model missing: $FAST_MODEL (run: ollama pull $FAST_MODEL)"
+    elif ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' | grep -qxF "$FAST_MODEL"; then
+      ok "Fast model: $FAST_MODEL"
+    fi
   else
     fail "No models installed"
   fi
@@ -487,7 +517,10 @@ version_line() { "$@" 2>&1 | head -1 | tr -d '\n' || echo "n/a"; }
 
 cmd_check_upgrades() {
   command -v brew >/dev/null || die "Homebrew required"
+  local env_file="$REPO_ROOT/config/models.env"
   echo "=== Upgrade check (no changes) ==="
+  echo ""
+  echo "--- Tools ---"
   echo "  Ollama:       $(version_line ollama --version)"
   echo "  OpenCode:     $(version_line opencode --version)"
   echo "  llama-server: $(version_line llama-server --version)"
@@ -511,7 +544,81 @@ cmd_check_upgrades() {
     fi
   fi
   echo ""
-  echo "Run: ./scripts/install.sh --upgrade"
+  echo "--- Qwen models (local) ---"
+  if command -v ollama >/dev/null; then
+    ollama list 2>/dev/null | tail -n +2 | while read -r name id size _rest; do
+      printf "  %-28s %s  %s\n" "$name" "$id" "$size"
+    done
+    echo ""
+    echo "  Pinned in config/models.env:"
+    echo "    PRIMARY:      ${PRIMARY_MODEL}"
+    echo "    FAST:         ${FAST_MODEL} ← ${FAST_MODEL_SOURCE}"
+    if [[ -f "$env_file" ]]; then
+      grep -E '^(PRIMARY_DIGEST|FAST_DIGEST|UPGRADED_AT)=' "$env_file" 2>/dev/null | sed 's/^/    /' || true
+    fi
+    echo ""
+    echo "  Monitor new releases:"
+    echo "    https://ollama.com/library/qwen3-coder/tags"
+    echo "    https://ollama.com/freehuntx/qwen3-coder/tags"
+  else
+    echo "  Ollama not installed"
+  fi
+  echo ""
+  echo "Commands:"
+  echo "  ./scripts/install.sh --upgrade-models   # re-pull Qwen models only (~fast if current)"
+  echo "  ./scripts/install.sh --upgrade            # tools + models + config"
+  echo "  See docs/UPGRADING.md"
+}
+
+cmd_upgrade_models() {
+  command -v ollama >/dev/null || die "Ollama not installed"
+  local before_p before_f before_fs
+  before_p="$(ollama list 2>/dev/null | awk -v m="$PRIMARY_MODEL" '$1==m {print $2}')"
+  before_f="$(ollama list 2>/dev/null | awk -v m="$FAST_MODEL" '$1==m {print $2}')"
+  before_fs="$(ollama list 2>/dev/null | awk -v m="$FAST_MODEL_SOURCE" '$1==m {print $2}')"
+
+  brew services start ollama 2>/dev/null || true
+  wait_for_ollama
+
+  log "Re-pulling $PRIMARY_MODEL..."
+  ollama pull "$PRIMARY_MODEL"
+  if [[ "$SKIP_FAST" != "1" ]]; then
+    log "Re-pulling $FAST_MODEL_SOURCE..."
+    ollama pull "$FAST_MODEL_SOURCE"
+    if [[ "$FAST_MODEL" != "$FAST_MODEL_SOURCE" ]]; then
+      log "Refreshing alias $FAST_MODEL → $FAST_MODEL_SOURCE"
+      ollama cp "$FAST_MODEL_SOURCE" "$FAST_MODEL"
+    fi
+  fi
+
+  local after_p after_f after_fs
+  after_p="$(ollama list 2>/dev/null | awk -v m="$PRIMARY_MODEL" '$1==m {print $2}')"
+  after_f="$(ollama list 2>/dev/null | awk -v m="$FAST_MODEL" '$1==m {print $2}')"
+  after_fs="$(ollama list 2>/dev/null | awk -v m="$FAST_MODEL_SOURCE" '$1==m {print $2}')"
+
+  update_models_env
+  verify_setup || warn "Verification failed — run: ./scripts/install.sh --repair"
+
+  echo ""
+  echo "=============================================="
+  echo " Model upgrade complete"
+  if [[ "$before_p" != "$after_p" ]]; then
+    echo "  $PRIMARY_MODEL: $before_p → $after_p (updated)"
+  else
+    echo "  $PRIMARY_MODEL: unchanged ($after_p)"
+  fi
+  if [[ "$SKIP_FAST" != "1" ]]; then
+    if [[ "$before_fs" != "$after_fs" ]]; then
+      echo "  $FAST_MODEL_SOURCE: $before_fs → $after_fs (updated)"
+    else
+      echo "  $FAST_MODEL_SOURCE: unchanged ($after_fs)"
+    fi
+    if [[ "$before_f" != "$after_f" ]]; then
+      echo "  $FAST_MODEL (alias): $before_f → $after_f"
+    fi
+  fi
+  echo "  Pinned in config/models.env (UPGRADED_AT, digests)"
+  echo "=============================================="
 }
 
 cmd_upgrade() {
@@ -546,7 +653,10 @@ cmd_upgrade() {
 
   if [[ "$SKIP_MODELS" != "1" ]]; then
     ollama pull "$PRIMARY_MODEL"
-    [[ "$PULL_FAST" == "1" ]] && ollama pull "$FAST_MODEL"
+    if [[ "$SKIP_FAST" != "1" ]]; then
+      ollama pull "$FAST_MODEL_SOURCE"
+      [[ "$FAST_MODEL" != "$FAST_MODEL_SOURCE" ]] && ollama cp "$FAST_MODEL_SOURCE" "$FAST_MODEL"
+    fi
     [[ "$CREATE_64K" == "1" ]] && create_64k_variant
   fi
 
@@ -575,8 +685,9 @@ cmd_upgrade() {
 case "${1:-}" in
   --verify)  verify_setup ;;
   --repair)  cmd_repair ;;
-  --upgrade) cmd_upgrade ;;
-  --check)   cmd_check_upgrades ;;
+  --upgrade)        cmd_upgrade ;;
+  --upgrade-models) cmd_upgrade_models ;;
+  --check)          cmd_check_upgrades ;;
   -h|--help)
     sed -n '2,18p' "$0"
     ;;

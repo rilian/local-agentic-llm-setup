@@ -14,7 +14,7 @@ Optional VS Code sidebar agent (Zoo Code): [setup-zoocode.md](setup-zoocode.md) 
 |------|------|------------|-------|
 | **0** | Install Homebrew | Manual once | Only if not already installed |
 | **1** | Install Ollama + start service | ✅ Yes | `scripts/install.sh` |
-| **2** | Pull coding model (~18 GB) | ✅ Yes, **~20–30 min** | Mostly download time (~22 min on M4 Pro) |
+| **2** | Pull models (30b + 14b) | ✅ Yes, **~25–40 min** | 30b ~18 GB + 14b ~9 GB |
 | **2b** | Fix `llama-server` (brew) | ✅ Yes | `install.sh` (built-in) |
 | **2c** | Ollama context 32k (tools) | ✅ Yes | `install.sh` (built-in) |
 | **3** | Install OpenCode CLI | ✅ Yes | `install.sh` |
@@ -43,15 +43,16 @@ chmod +x scripts/install.sh scripts/loop.sh
 | `./scripts/install.sh` | Full install (new machine) |
 | `./scripts/install.sh --verify` | Verify setup (~15s) |
 | `./scripts/install.sh --repair` | Re-apply fixes (llama-server, context, OpenCode config) |
-| `./scripts/install.sh --upgrade` | Upgrade Ollama, OpenCode, models |
-| `./scripts/install.sh --check` | Check for available upgrades (no changes) |
+| `./scripts/install.sh --upgrade` | Upgrade stack |
+| `./scripts/install.sh --upgrade-models` | Re-pull Qwen models only |
+| `./scripts/install.sh --check` | Check for updates |
 
 Optional env vars:
 
 ```bash
-PULL_FAST=1 ./scripts/install.sh      # also pull qwen3-coder:14b
-CREATE_64K=1 ./scripts/install.sh     # optional 64k Modelfile (65536 — tight on 24 GB RAM)
-PRIMARY_MODEL=qwen3-coder:14b ./scripts/install.sh   # smaller/faster model
+SKIP_FAST=1 ./scripts/install.sh        # skip 14b (~9 GB) if disk is tight
+CREATE_64K=1 ./scripts/install.sh       # optional 64k Modelfile (65536 — tight on 24 GB RAM)
+PRIMARY_MODEL=qwen3-coder:14b ./scripts/install.sh   # 14b only as primary (smaller machine)
 ```
 
 An agent (or you) **can** run `./scripts/install.sh` end-to-end. What still needs **you**:
@@ -71,7 +72,7 @@ An agent (or you) **can** run `./scripts/install.sh` end-to-end. What still need
   └── ./scripts/loop.sh
             │
             ▼
-     Ollama :11434  ←  qwen3-coder:30b (32k ctx default)
+     Ollama :11434  ←  qwen3-coder:30b (default) · qwen3-coder:14b (fast)
 ```
 
 Use VS Code as your editor; run OpenCode in the integrated terminal (`cd project && opencode`).
@@ -94,9 +95,9 @@ The install script performs:
 
 1. `brew install ollama` + `brew services start ollama`
 2. Set `OLLAMA_CONTEXT_LENGTH=32768` and `OLLAMA_KEEP_ALIVE=-1` in launchd plist
-3. `ollama pull qwen3-coder:30b`
+3. `ollama pull qwen3-coder:30b` + fast model `qwen3-coder:14b` (from `freehuntx/qwen3-coder:14b`, aliased locally)
 4. `brew install anomalyco/tap/opencode` (or curl installer fallback)
-5. Copy `config/opencode.json.example` → `~/.config/opencode/opencode.json` (model: `qwen3-coder:30b`)
+5. Copy `config/opencode.json.example` → `~/.config/opencode/opencode.json` (default model: `qwen3-coder:30b`; 14b also configured)
 6. Copy `config/models.env.example` → `config/models.env`
 7. `chmod +x scripts/loop.sh`
 
@@ -112,7 +113,8 @@ brew install ollama node
 brew services start ollama
 
 ollama pull qwen3-coder:30b
-ollama pull qwen3-coder:14b   # optional
+ollama pull freehuntx/qwen3-coder:14b
+ollama cp freehuntx/qwen3-coder:14b qwen3-coder:14b
 
 # Default: 32k context via OLLAMA_CONTEXT_LENGTH=32768 (install.sh sets this)
 # Optional 64k Modelfile (tight on 24 GB RAM):
@@ -203,20 +205,59 @@ Guided first launch (alternative to manual config):
 ollama launch opencode
 ```
 
-### Performance tips (local 30B)
+### Performance tips (local models)
 
 `install.sh` sets **`OLLAMA_KEEP_ALIVE=-1`** so the model stays in RAM after first use — no ~1–2 min reload when you restart `opencode`.
 
 | Habit | Why |
 |-------|-----|
-| **Keep one `opencode` session open** | Avoid `Ctrl+C` — restarting loses context and may feel slow on first turn |
-| **Pre-warm once per day** (optional) | `ollama run qwen3-coder:30b "hi"` before first `opencode` if the model was never loaded |
+| **Keep one `opencode` session open** | Avoid `Ctrl+C` — restarting loses context |
+| **Use 14b for quick work, 30b for hard tasks** | See [Choosing a model](#choosing-a-model-30b-vs-14b) below |
+| **Pre-warm once per day** (optional) | `ollama run qwen3-coder:30b "hi"` if nothing loaded yet |
 | **Focused prompts** | *"Fix auth.ts validateToken"* beats *"review entire codebase"* |
 | **`@explore` for search** | Read-only subagent — less context than reading many files |
-| **`qwen3-coder:14b` for quick tasks** | Switch model in OpenCode for simple edits (`PULL_FAST=1 ./scripts/install.sh`) |
-| **Limit MCPs** | Disable servers you are not using — each adds tool definitions to context |
+| **Limit MCPs** | Disable servers you are not using |
 
-First message after a cold start is slowest (~1–2 min). After the model is warm, expect seconds to ~30s per turn.
+First message after a cold start is slowest (~30s for 14b, ~1–2 min for 30b). After warm, expect seconds to ~30s per turn.
+
+### Choosing a model (30b vs 14b)
+
+Both models are installed by `./scripts/install.sh`. **Default is 30b** — best quality for complex agent work.
+
+> **Note:** Ollama's official library has no `qwen3-coder:14b`. Install pulls `freehuntx/qwen3-coder:14b` and creates a local alias `qwen3-coder:14b` for OpenCode.
+
+| Model | Size | Speed | Use for |
+|-------|------|-------|---------|
+| `qwen3-coder:30b` | ~18 GB | Slower | Refactors, multi-file edits, hard bugs, `/loop` |
+| `qwen3-coder:14b` | ~9 GB | ~2× faster | Quick fixes, single-file edits, exploration, chat |
+
+**Start OpenCode with a specific model:**
+
+```bash
+opencode                              # default: 30b (from opencode.json)
+opencode --model ollama/qwen3-coder:14b    # fast session
+opencode --model ollama/qwen3-coder:30b    # explicit 30b
+```
+
+**Switch mid-session** (inside the TUI):
+
+```text
+/models          # or Ctrl+x m — pick ollama/qwen3-coder:14b or :30b
+```
+
+**One-shot with 14b:**
+
+```bash
+opencode run -i -m ollama/qwen3-coder:14b "Add a type annotation to parseUser in auth.ts"
+```
+
+**Practical workflow:**
+
+1. Morning: `opencode --model ollama/qwen3-coder:14b` for quick tasks through the day
+2. Hard problem: `/models` → switch to `qwen3-coder:30b`, or start a new session with `opencode --model ollama/qwen3-coder:30b`
+3. Long autonomous work: `./scripts/loop.sh "…"` (uses 30b from config)
+
+List installed models: `ollama list` · OpenCode model names: `opencode models ollama`
 
 ---
 
@@ -480,14 +521,15 @@ Each iteration runs `opencode run -i` — **stay at the terminal** and approve a
 
 ## Updating the stack
 
+See **[UPGRADING.md](UPGRADING.md)** for monitoring Qwen releases and upgrade routines.
+
 ```bash
-./scripts/install.sh --upgrade          # upgrade everything + verify
-./scripts/install.sh --check              # check only, no changes
+./scripts/install.sh --check              # check tools + model digests (no downloads)
+./scripts/install.sh --upgrade-models     # re-pull Qwen 30b + 14b only
+./scripts/install.sh --upgrade            # full stack: brew + models + config
 SKIP_MODELS=1 ./scripts/install.sh --upgrade
 OLLAMA_CONTEXT=65536 ./scripts/install.sh --upgrade   # 64k context (24 GB — tight)
 ```
-
-Upgrades: Ollama, llama.cpp, OpenCode, models, re-applies llama-server + context + OpenCode config, runs `--verify`. Pins versions in `config/models.env`.
 
 ```bash
 ollama pull qwen3-coder:30b
@@ -543,13 +585,16 @@ Re-run after `brew upgrade ollama`. **Alternative:** use [Ollama.app](https://ol
 | Item | Value |
 |------|-------|
 | Auto install | `./scripts/install.sh` |
-| Upgrade | `./scripts/install.sh --upgrade` |
+| Upgrade | `./scripts/install.sh --upgrade` · [UPGRADING.md](UPGRADING.md) |
+| Upgrade models | `./scripts/install.sh --upgrade-models` |
 | Check updates | `./scripts/install.sh --check` |
 | Verify | `./scripts/install.sh --verify` |
 | Repair fixes | `./scripts/install.sh --repair` |
 | Web search | `OPENCODE_ENABLE_EXA=1 opencode` |
 | Ollama API | `http://127.0.0.1:11434` |
 | Terminal agent | `opencode` (approve each action) |
+| Fast session | `opencode --model ollama/qwen3-coder:14b` |
+| Switch model (TUI) | `/models` or `Ctrl+x m` |
 | Long task | `./scripts/loop.sh "…"` |
 | OpenCode config | `~/.config/opencode/opencode.json` |
 | MCP example config | `config/opencode.mcp.example.json` |
