@@ -148,7 +148,7 @@ ensure_ollama_post_install() {
 # ---------------------------------------------------------------------------
 
 configure_opencode() {
-  local example="$REPO_ROOT/config/opencode.json.example"
+  local example="$REPO_ROOT/opencode.json.example"
   local target="${OPENCODE_CONFIG:-$HOME/.config/opencode/opencode.json}"
   local model_for_config="${MODEL_FOR_CONFIG:-$PRIMARY_MODEL}"
   local existing=""

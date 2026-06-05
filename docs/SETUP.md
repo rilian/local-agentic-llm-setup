@@ -97,7 +97,7 @@ The install script performs:
 2. Set `OLLAMA_CONTEXT_LENGTH=32768` and `OLLAMA_KEEP_ALIVE=-1` in launchd plist
 3. `ollama pull qwen3-coder:30b` + fast model `qwen3-coder:14b` (from `freehuntx/qwen3-coder:14b`, aliased locally)
 4. `brew install anomalyco/tap/opencode` (or curl installer fallback)
-5. Copy `config/opencode.json.example` → `~/.config/opencode/opencode.json` (default model: `qwen3-coder:30b`; 14b also configured)
+5. Copy `opencode.json.example` → `~/.config/opencode/opencode.json` (default model: `qwen3-coder:30b`; 14b also configured)
 6. Copy `config/models.env.example` → `config/models.env`
 7. `chmod +x scripts/loop.sh`
 
@@ -122,7 +122,7 @@ ollama cp freehuntx/qwen3-coder:14b qwen3-coder:14b
 
 brew install anomalyco/tap/opencode
 mkdir -p ~/.config/opencode
-cp config/opencode.json.example ~/.config/opencode/opencode.json
+cp opencode.json.example ~/.config/opencode/opencode.json
 
 cp config/models.env.example config/models.env
 chmod +x scripts/loop.sh
@@ -272,9 +272,9 @@ Official reference: [OpenCode MCP docs](https://open-code.ai/en/docs/mcp-servers
 | Scope | File |
 |-------|------|
 | **Global** (all projects) | `~/.config/opencode/opencode.json` |
-| **Project** (one repo) | `./opencode.json` in project root |
+| **Project** (one repo) | `./opencode.json` (copy from [opencode.json.example](../opencode.json.example)) |
 
-MCP examples (Foundry, GitHub, Context7, Sentry) are in [config/opencode.json.example](../config/opencode.json.example) under `"mcp"` — copy the block you need into global or project config and set `"enabled": true`.
+MCP examples (Foundry, GitHub, Context7, Sentry) are in [opencode.json.example](../opencode.json.example) under `"mcp"` — copy the block you need into global or project config and set `"enabled": true`.
 
 ### Option A — Interactive wizard (easiest)
 
@@ -596,7 +596,7 @@ Re-run after `brew upgrade ollama`. **Alternative:** use [Ollama.app](https://ol
 | Fast session | `opencode --model ollama/qwen3-coder:14b` |
 | Switch model (TUI) | `/models` or `Ctrl+x m` |
 | Long task | `./scripts/loop.sh "…"` |
-| OpenCode config | `~/.config/opencode/opencode.json` · [config/opencode.json.example](../config/opencode.json.example) |
+| OpenCode config | `~/.config/opencode/opencode.json` · [opencode.json.example](../opencode.json.example) |
 | MCP commands | `opencode mcp add` · `opencode mcp list` |
 | Optional Zoo Code | [setup-zoocode.md](setup-zoocode.md) |
 

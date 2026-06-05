@@ -1,4 +1,4 @@
-# Local / secret config (examples in config/*.example stay tracked)
+# Local / secret config (examples: opencode.json.example, config/models.env.example)
 config/models.env
 opencode.json
 .env
