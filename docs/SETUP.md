@@ -1,8 +1,10 @@
 # Full Setup: Local Agentic LLM (Mac M4 Pro)
 
-Terminal-first agent (**OpenCode** + **`./scripts/loop.sh`**). **ChatGPT** for general GUI. **VS Code + Zoo Code** is the optional **last step** (manual).
+Terminal-first agent: **OpenCode** + **`./scripts/loop.sh`**. **ChatGPT** for general GUI chat.
 
 **Hardware:** MacBook Pro M4 Pro, 24 GB RAM.
+
+Optional VS Code sidebar agent (Zoo Code): [setup-zoocode.md](setup-zoocode.md) — not required.
 
 ---
 
@@ -13,15 +15,19 @@ Terminal-first agent (**OpenCode** + **`./scripts/loop.sh`**). **ChatGPT** for g
 | **0** | Install Homebrew | Manual once | Only if not already installed |
 | **1** | Install Ollama + start service | ✅ Yes | `scripts/install.sh` |
 | **2** | Pull coding model (~18 GB) | ✅ Yes, **~20–30 min** | Mostly download time (~22 min on M4 Pro) |
-| **2b** | Fix `llama-server` (brew) | ✅ Yes | Script installs `llama.cpp` + symlink — **required for GGUF** |
-| **3** | Install OpenCode CLI | ✅ Yes | `scripts/install.sh` |
-| **4** | Wire OpenCode → Ollama | ✅ Yes | Copies `config/opencode.json.example` |
+| **2b** | Fix `llama-server` (brew) | ✅ Yes | `install.sh` (built-in) |
+| **2c** | Ollama context 32k (tools) | ✅ Yes | `install.sh` (built-in) |
+| **3** | Install OpenCode CLI | ✅ Yes | `install.sh` |
+| **4** | Wire OpenCode → Ollama | ✅ Yes | `install.sh` — tool_call, timeout, permissions |
+| **4b** | Web search env | ✅ Yes | `install.sh` → `OPENCODE_ENABLE_EXA=1` in `~/.zshrc` |
 | **5** | Use terminal agent | You run | `opencode` — approve each action |
+| **5b** | Attach MCP servers | You configure | `opencode mcp add` or `opencode.json` — [Step 5b](#step-5b-attach-mcp-servers-optional) |
 | **6** | `/loop` long tasks | You run | `./scripts/loop.sh "…"` |
 | **7** | Pin model in repo | ✅ Yes | Creates `config/models.env` |
-| **8** | VS Code + Zoo Code | ❌ **Manual** | Marketplace + UI clicks — **last step** |
 
-### One-command automated setup (Steps 1–4, 7)
+### One-command setup (new machine)
+
+An LLM or you can run **only this**:
 
 ```bash
 git clone <this-repo> ~/local-agentic-llm-setup   # if needed
@@ -30,11 +36,21 @@ chmod +x scripts/install.sh scripts/loop.sh
 ./scripts/install.sh
 ```
 
+**All fixes, config, and verification are built into `install.sh`.** No separate fix scripts.
+
+| Command | Purpose |
+|---------|---------|
+| `./scripts/install.sh` | Full install (new machine) |
+| `./scripts/install.sh --verify` | Verify setup (~15s) |
+| `./scripts/install.sh --repair` | Re-apply fixes (llama-server, context, OpenCode config) |
+| `./scripts/install.sh --upgrade` | Upgrade Ollama, OpenCode, models |
+| `./scripts/install.sh --check` | Check for available upgrades (no changes) |
+
 Optional env vars:
 
 ```bash
 PULL_FAST=1 ./scripts/install.sh      # also pull qwen3-coder:14b
-CREATE_64K=0 ./scripts/install.sh     # skip 64k Modelfile variant
+CREATE_64K=1 ./scripts/install.sh     # optional 64k Modelfile (65536 — tight on 24 GB RAM)
 PRIMARY_MODEL=qwen3-coder:14b ./scripts/install.sh   # smaller/faster model
 ```
 
@@ -42,7 +58,6 @@ An agent (or you) **can** run `./scripts/install.sh` end-to-end. What still need
 
 1. Homebrew absent → install from brew.sh first
 2. Model download → wait (network + disk)
-3. **Step 8** → install Zoo Code extension in VS Code by hand
 
 **Observed on this machine (2026-06-04):** full `install.sh` ~22 min; first Ollama inference ~2 min (model load into RAM).
 
@@ -51,13 +66,15 @@ An agent (or you) **can** run `./scripts/install.sh` end-to-end. What still need
 ## Architecture
 
 ```
-  Terminal (primary)                VS Code (optional, Step 8)
-  ├── opencode                      └── Zoo Code → same Ollama API
+  Terminal
+  ├── opencode
   └── ./scripts/loop.sh
             │
             ▼
-     Ollama :11434  ←  qwen3-coder:30b / qwen3-coder-64k
+     Ollama :11434  ←  qwen3-coder:30b (32k ctx default)
 ```
+
+Use VS Code as your editor; run OpenCode in the integrated terminal (`cd project && opencode`).
 
 ---
 
@@ -76,12 +93,14 @@ Skip if `brew --version` works.
 The install script performs:
 
 1. `brew install ollama` + `brew services start ollama`
-2. `ollama pull qwen3-coder:30b`
-3. `ollama create qwen3-coder-64k` (64K context Modelfile)
+2. Set `OLLAMA_CONTEXT_LENGTH=32768` and `OLLAMA_KEEP_ALIVE=-1` in launchd plist
+3. `ollama pull qwen3-coder:30b`
 4. `brew install anomalyco/tap/opencode` (or curl installer fallback)
-5. Copy `config/opencode.json.example` → `~/.config/opencode/opencode.json`
+5. Copy `config/opencode.json.example` → `~/.config/opencode/opencode.json` (model: `qwen3-coder:30b`)
 6. Copy `config/models.env.example` → `config/models.env`
 7. `chmod +x scripts/loop.sh`
+
+Optional: `CREATE_64K=1 ./scripts/install.sh` also creates `qwen3-coder-64k` (65536 context — tight on 24 GB RAM).
 
 ### Manual equivalent (same steps)
 
@@ -95,17 +114,13 @@ brew services start ollama
 ollama pull qwen3-coder:30b
 ollama pull qwen3-coder:14b   # optional
 
-# 64k context (recommended for OpenCode)
-cat > /tmp/Modelfile <<'EOF'
-FROM qwen3-coder:30b
-PARAMETER num_ctx 65536
-EOF
-ollama create qwen3-coder-64k -f /tmp/Modelfile
+# Default: 32k context via OLLAMA_CONTEXT_LENGTH=32768 (install.sh sets this)
+# Optional 64k Modelfile (tight on 24 GB RAM):
+# CREATE_64K=1 ./scripts/install.sh
 
 brew install anomalyco/tap/opencode
 mkdir -p ~/.config/opencode
 cp config/opencode.json.example ~/.config/opencode/opencode.json
-# set "model": "ollama/qwen3-coder-64k" in opencode.json
 
 cp config/models.env.example config/models.env
 chmod +x scripts/loop.sh
@@ -116,15 +131,15 @@ chmod +x scripts/loop.sh
 ### Verify Steps 1–7 (fast — no model load)
 
 ```bash
-./scripts/verify.sh
+./scripts/install.sh --verify
 ```
 
-This checks Ollama API, `llama-server` binary, models, and a **10-second runtime probe** (catches `llama-server binary not found` without waiting for the 30B model to load).
+This checks Ollama API, `llama-server` binary, **OLLAMA_CONTEXT_LENGTH=32768**, OpenCode tool config (`tool_call`, `websearch`, `task`), models, and a **10-second runtime probe**.
 
 Optional full inference test (~2 min first load):
 
 ```bash
-VERIFY_INFERENCE=1 ./scripts/verify.sh
+VERIFY_INFERENCE=1 ./scripts/install.sh --verify
 ```
 
 Manual checks:
@@ -138,11 +153,11 @@ opencode --version
 If you see `llama-server binary not found`:
 
 ```bash
-./scripts/fix-llama-server.sh
-./scripts/verify.sh
+./scripts/install.sh --repair
+./scripts/install.sh --verify
 ```
 
-Do **not** use `ollama run … "setup ok"` as a quick test — the 30B model takes ~2 min to load on first run. Use `./scripts/verify.sh` instead.
+Do **not** use `ollama run … "setup ok"` as a quick test — the 30B model takes ~2 min to load on first run. Use `./scripts/install.sh --verify` instead.
 
 ---
 
@@ -155,14 +170,16 @@ This setup **never** uses `--dangerously-skip-permissions`. You approve every fi
 | **OpenCode TUI** | Run `opencode` → approve/deny each tool call in the UI |
 | **OpenCode one-shot** | `opencode run -i "…"` → same prompts in split-footer mode |
 | **loop.sh** | Uses `opencode run -i` each iteration — stay at the terminal to approve |
-| **Zoo Code** | Leave **Auto Approve (BRRR)** **off** — approve Read / Write / Execute per action |
 
-Do **not** pass `--dangerously-skip-permissions` and do **not** enable Zoo Code BRRR auto-approve unless you explicitly want to override this policy later.
+Do **not** pass `--dangerously-skip-permissions`.
 
 ## Step 5: Daily terminal use
 
+Open VS Code for editing, then use the integrated terminal:
+
 ```bash
 cd /path/to/your/project
+source ~/.zshrc    # once per session (web search)
 opencode
 ```
 
@@ -186,6 +203,268 @@ Guided first launch (alternative to manual config):
 ollama launch opencode
 ```
 
+### Performance tips (local 30B)
+
+`install.sh` sets **`OLLAMA_KEEP_ALIVE=-1`** so the model stays in RAM after first use — no ~1–2 min reload when you restart `opencode`.
+
+| Habit | Why |
+|-------|-----|
+| **Keep one `opencode` session open** | Avoid `Ctrl+C` — restarting loses context and may feel slow on first turn |
+| **Pre-warm once per day** (optional) | `ollama run qwen3-coder:30b "hi"` before first `opencode` if the model was never loaded |
+| **Focused prompts** | *"Fix auth.ts validateToken"* beats *"review entire codebase"* |
+| **`@explore` for search** | Read-only subagent — less context than reading many files |
+| **`qwen3-coder:14b` for quick tasks** | Switch model in OpenCode for simple edits (`PULL_FAST=1 ./scripts/install.sh`) |
+| **Limit MCPs** | Disable servers you are not using — each adds tool definitions to context |
+
+First message after a cold start is slowest (~1–2 min). After the model is warm, expect seconds to ~30s per turn.
+
+---
+
+## Step 5b: Attach MCP servers (optional)
+
+OpenCode can use **Model Context Protocol (MCP)** servers — the same kind of tools you may already have in Cursor or Claude Desktop. Once attached, MCP tools appear alongside built-in tools (file edit, bash, etc.) and still require **your approval** per action.
+
+Official reference: [OpenCode MCP docs](https://open-code.ai/en/docs/mcp-servers)
+
+### Where config lives
+
+| Scope | File |
+|-------|------|
+| **Global** (all projects) | `~/.config/opencode/opencode.json` |
+| **Project** (one repo) | `./opencode.json` in project root |
+
+Merge an `mcp` block into your existing config, or copy snippets from [config/opencode.mcp.example.json](../config/opencode.mcp.example.json).
+
+### Option A — Interactive wizard (easiest)
+
+```bash
+opencode mcp add
+```
+
+Follow prompts for a **local** (stdio) or **remote** (URL) server.
+
+Then verify:
+
+```bash
+opencode mcp list
+opencode mcp debug my-server-name   # if connection fails
+opencode mcp auth my-server-name    # OAuth servers (e.g. Sentry)
+```
+
+Restart OpenCode (`opencode` TUI) after adding servers.
+
+### Option B — Edit `opencode.json` manually
+
+**Local MCP** (stdio — most npm/npx servers):
+
+```json
+{
+  "mcp": {
+    "github": {
+      "type": "local",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
+      "enabled": true,
+      "environment": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "{env:GITHUB_PERSONAL_ACCESS_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+**Remote MCP** (HTTP URL):
+
+```json
+{
+  "mcp": {
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": true,
+      "headers": {
+        "CONTEXT7_API_KEY": "{env:CONTEXT7_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+Use `{env:VAR_NAME}` for secrets — set them in your shell or `.env`, not in the JSON file.
+
+### Port existing MCPs from Cursor / Claude Desktop
+
+Cursor and Claude Desktop use `mcpServers` in JSON. OpenCode uses `mcp` with a slightly different shape:
+
+| Cursor / Claude Desktop | OpenCode |
+|-------------------------|----------|
+| `"mcpServers": { "name": { … } }` | `"mcp": { "name": { … } }` |
+| `"command": "npx"` + `"args": ["-y", "pkg"]` | `"command": ["npx", "-y", "pkg"]` |
+| `"env": { "KEY": "val" }` | `"environment": { "KEY": "val" }` |
+| `"url": "https://…"` (remote) | `"type": "remote", "url": "https://…"` |
+| (implicit) | add `"type": "local"` for command-based servers |
+| (implicit) | add `"enabled": true` |
+
+**Example — Cursor `~/.cursor/mcp.json`:**
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_…"
+      }
+    }
+  }
+}
+```
+
+**Same server in OpenCode** (`~/.config/opencode/opencode.json`):
+
+```json
+{
+  "mcp": {
+    "github": {
+      "type": "local",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
+      "enabled": true,
+      "environment": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "{env:GITHUB_PERSONAL_ACCESS_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Export the token in your shell before starting OpenCode:
+
+```bash
+export GITHUB_PERSONAL_ACCESS_TOKEN="ghp_…"
+opencode
+```
+
+### Using MCP tools in prompts
+
+MCP tools are registered with the server name as prefix. Mention the server in your prompt:
+
+```
+List my open GitHub issues for this repo. use github
+```
+
+Or add guidance to an `AGENTS.md` in your project:
+
+```markdown
+When you need library docs, use the context7 MCP tools.
+```
+
+### Enable / disable MCP tools
+
+Disable a server without removing config:
+
+```json
+{
+  "mcp": {
+    "github": { "type": "local", "command": ["…"], "enabled": false }
+  }
+}
+```
+
+Disable all tools from a server globally (useful when you have many MCPs):
+
+```json
+{
+  "tools": {
+    "github_*": false
+  }
+}
+```
+
+Re-enable per agent if needed — see [OpenCode MCP docs](https://open-code.ai/en/docs/mcp-servers).
+
+### Tips for local 30B model (24 GB RAM)
+
+- Each MCP adds tool definitions to context — **enable only what you need**
+- Heavy MCPs (GitHub, large DB schemas) can crowd out code context
+- Prefer 1–2 MCPs per task; disable the rest with `"enabled": false`
+
+### Verify MCP setup
+
+```bash
+opencode mcp list          # should show your servers
+cd /path/to/project && opencode
+# ask: "What MCP tools do you have available?"
+```
+
+Approve MCP tool calls the same way as file edits and bash commands.
+
+---
+
+## Step 5c: Tools, web search, subagents (required for agent work)
+
+If the model **chatters but never reads files, runs bash, or calls MCPs**, Ollama is almost certainly using a **4096-token context** — too small to fit tool definitions. This is the #1 local-agent failure mode.
+
+### One-command fix (also runs automatically from `./scripts/install.sh`)
+
+```bash
+cd ~/work/local-agentic-llm-setup
+./scripts/install.sh          # full install — includes all fixes below
+# or re-apply fixes only:
+./scripts/install.sh --repair # llama-server + context 32k
+./scripts/install.sh --verify # auto-checks context, tool config, web search env
+```
+
+Add to `~/.zshrc` (done automatically by `install.sh`; only if missing):
+
+```bash
+export OPENCODE_ENABLE_EXA=1
+source ~/.zshrc
+```
+
+### Verify context (must NOT be 4096)
+
+```bash
+ollama run qwen3-coder:30b "hi"    # warm the model (~2 min first time)
+ollama ps                          # CONTEXT column should show 32768
+```
+
+### Verify tool calling
+
+```bash
+cd ~/work/local-agentic-llm-setup
+opencode run -i "Use the read tool on GOAL.md and quote the first line verbatim"
+```
+
+You should see a **tool call** (read) and an approval prompt — not just prose about what it would do.
+
+### Web search
+
+Built-in `websearch` (Exa) requires `OPENCODE_ENABLE_EXA=1` when using Ollama (see above). Test:
+
+```
+Search the web for OpenCode release notes. use websearch
+```
+
+`webfetch` works for known URLs without Exa.
+
+### Subagents
+
+OpenCode **build** agent can delegate to subagents via the **task** tool, or you invoke them directly:
+
+| Subagent | Use for |
+|----------|---------|
+| `@explore` | Read-only codebase search (grep, glob, read) |
+| `@general` | General subtasks |
+| `@scout` | Fast exploration |
+
+Example:
+
+```
+@explore Find where install.sh sets up Ollama and summarize in 3 bullets
+```
+
+Subagents only work if the **primary model calls tools** — fix context first (Step 5c above).
+
 ---
 
 ## Step 6: `/loop` long tasks
@@ -195,113 +474,27 @@ ollama launch opencode
 ./scripts/loop.sh --max 40 "larger task"
 ```
 
-Each iteration runs `opencode run -i` — **stay at the terminal** and approve actions as they appear. Uses [prompts/loop.md](../prompts/loop.md). In VS Code (Step 8), use `/loop` from [.roo/commands/loop.md](../.roo/commands/loop.md) and approve each Zoo Code action.
+Each iteration runs `opencode run -i` — **stay at the terminal** and approve actions as they appear. Uses [prompts/loop.md](../prompts/loop.md).
 
 ---
 
-## Step 8: VS Code + Zoo Code (manual — do this last)
-
-Do this **after** Steps 1–7 work. Ollama must already be running on `http://127.0.0.1:11434`.
-
-> **Roo Code is sunset (May 2026).** The original Roo Code extension still works but receives no updates. This guide uses **[Zoo Code](https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code)** — a community fork with active development and the same Ollama/local setup. If you already use Roo Code, see the [Roo → Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration). **Alternative:** [Cline](https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev) (where Roo Code originated).
-
-### 8a. Install VS Code (if needed)
-
-Download from [code.visualstudio.com](https://code.visualstudio.com) or:
+## Updating the stack
 
 ```bash
-brew install --cask visual-studio-code
+./scripts/install.sh --upgrade          # upgrade everything + verify
+./scripts/install.sh --check              # check only, no changes
+SKIP_MODELS=1 ./scripts/install.sh --upgrade
+OLLAMA_CONTEXT=65536 ./scripts/install.sh --upgrade   # 64k context (24 GB — tight)
 ```
 
-### 8b. Install Zoo Code extension (manual)
-
-1. Open **Visual Studio Code**
-2. **Extensions** (`Cmd+Shift+X`)
-3. Search **Zoo Code**
-4. Install **Zoo Code** (publisher: **Zoo Code Organization**)
-5. Click the **Zoo Code** icon in the left activity bar
-
-CLI install (optional):
-
-```bash
-code --install-extension ZooCodeOrganization.zoo-code
-```
-
-Cannot be automated — VS Code Marketplace requires a click in the editor (unless using CLI above).
-
-### 8c. Connect Zoo Code to your local Ollama
-
-1. Open Zoo Code panel → click the **gear icon** (Provider Settings)
-2. Set:
-
-   | Setting | Value |
-   |---------|-------|
-   | **API Provider** | `Ollama` |
-   | **Base URL** | `http://localhost:11434` |
-   | **Model ID** | Exact name from `ollama list` — e.g. `qwen3-coder-64k` or `qwen3-coder:30b` |
-
-3. Click **Save** / close settings
-4. **No API key** required for local Ollama
-
-**Test:** in Zoo Code chat, send `What model are you using? Reply in one sentence.`
-
-If it errors:
-
-```bash
-# confirm Ollama is up
-curl http://127.0.0.1:11434/api/tags
-ollama list
-```
-
-Common fixes:
-
-- Wrong model ID → must match `ollama list` exactly
-- Ollama not running → `brew services start ollama`
-- Use `http://localhost:11434` not `https://`
-
-### 8d. Manual approval (required)
-
-Keep **Auto Approve (BRRR) disabled**. Approve each action in the Zoo Code sidebar:
-
-1. When Zoo Code wants to read, write, or run a command → review the diff or command → **Approve** or **Reject**
-2. For shell commands, this repo's `.vscode/settings.json` lists common allowed commands (`npm`, `git`, `bash`, etc.) — Zoo Code still asks before running them unless you later enable auto-approve yourself
-3. Long `/loop` tasks work fine with manual approval; they just take more clicks
-
-### 8e. Use `/loop` in Zoo Code (optional)
-
-Zoo Code uses the same `.roo/commands/` folder as Roo Code (inherited from the fork). Open a workspace that contains `.roo/commands/loop.md` (this repo, or copy that file to your project).
-
-1. Zoo Code chat → type `/`
-2. Select **`loop`**
-3. Example:
-
-```
-/loop Add unit tests for the auth module, run npm test, fix failures. LOOP_COMPLETE when done.
-```
-
-Approve each file edit and `npm` command when Zoo Code prompts.
-
-### Step 8 verification
-
-- [ ] Zoo Code responds using local model (no cloud API key)
-- [ ] `ollama list` model name matches Zoo Code **Model ID**
-- [ ] Agent can edit a file from Zoo Code sidebar
-- [ ] (Optional) `/loop` appears in slash command list
-
----
-
-## Updating models
+Upgrades: Ollama, llama.cpp, OpenCode, models, re-applies llama-server + context + OpenCode config, runs `--verify`. Pins versions in `config/models.env`.
 
 ```bash
 ollama pull qwen3-coder:30b
 ollama rm old-tag
 ```
 
-Update:
-
-- `~/.config/opencode/opencode.json` → `"model"` field
-- Zoo Code settings → Model ID
-- `config/models.env`
+Also update `~/.config/opencode/opencode.json` → `"model"` field (or `./scripts/install.sh --repair`).
 
 ---
 
@@ -309,13 +502,15 @@ Update:
 
 | Problem | Fix |
 |---------|-----|
-| `llama-server binary not found` | `./scripts/fix-llama-server.sh` then `./scripts/verify.sh` |
+| `llama-server binary not found` | `./scripts/install.sh --repair` then `./scripts/install.sh --verify` |
 | Ollama not running | `brew services start ollama` |
 | First inference ~2 min | Normal — 30B model loading into RAM |
 | OpenCode permission prompts | Expected — approve or deny in the UI; never use `--dangerously-skip-permissions` |
-| Zoo Code can't connect | Check Base URL + model ID vs `ollama list` |
-| Zoo Code asks approve every action | Expected with approval-only policy (Step 8d) |
-| Loop stops early | `./scripts/loop.sh --max 50 "…"` or `--continue` in opencode |
+| Model talks but never uses tools | `./scripts/install.sh --repair` |
+| `ollama ps` shows CONTEXT 4096 | `./scripts/install.sh --repair` |
+| Web search unavailable | `export OPENCODE_ENABLE_EXA=1` before `opencode` |
+| MCP server not connecting | `opencode mcp list` · `opencode mcp debug <name>` · check `command`/`url` in config |
+| Loop stops early | `./scripts/loop.sh --max 50 "…"` |
 
 ### `llama-server binary not found` (Homebrew Ollama 0.30+)
 
@@ -324,8 +519,8 @@ Homebrew Ollama does not bundle `llama-server`; GGUF models fail without this fi
 **One command:**
 
 ```bash
-./scripts/fix-llama-server.sh
-./scripts/verify.sh
+./scripts/install.sh --repair
+./scripts/install.sh --verify
 ```
 
 **Manual equivalent:**
@@ -348,15 +543,18 @@ Re-run after `brew upgrade ollama`. **Alternative:** use [Ollama.app](https://ol
 | Item | Value |
 |------|-------|
 | Auto install | `./scripts/install.sh` |
-| Fast verify | `./scripts/verify.sh` |
-| Fix llama-server | `./scripts/fix-llama-server.sh` |
+| Upgrade | `./scripts/install.sh --upgrade` |
+| Check updates | `./scripts/install.sh --check` |
+| Verify | `./scripts/install.sh --verify` |
+| Repair fixes | `./scripts/install.sh --repair` |
+| Web search | `OPENCODE_ENABLE_EXA=1 opencode` |
 | Ollama API | `http://127.0.0.1:11434` |
 | Terminal agent | `opencode` (approve each action) |
-| Long task (terminal) | `./scripts/loop.sh "…"` |
-| Long task (VS Code) | `/loop …` in Zoo Code |
+| Long task | `./scripts/loop.sh "…"` |
 | OpenCode config | `~/.config/opencode/opencode.json` |
-| Zoo Code allowed cmds | `.vscode/settings.json` (`roo-cline.*` keys) |
-| Last manual step | **Step 8 — Zoo Code extension** |
+| MCP example config | `config/opencode.mcp.example.json` |
+| MCP commands | `opencode mcp add` · `opencode mcp list` |
+| Optional Zoo Code | [setup-zoocode.md](setup-zoocode.md) |
 
 ---
 
@@ -364,6 +562,6 @@ Re-run after `brew upgrade ollama`. **Alternative:** use [Ollama.app](https://ol
 
 - [ ] Step 0: Homebrew installed
 - [ ] Steps 1–7: `./scripts/install.sh` succeeded
-- [ ] Fast verify: `./scripts/verify.sh`
-- [ ] **Step 8:** Zoo Code installed + connected to Ollama
+- [ ] Fast verify: `./scripts/install.sh --verify`
+- [ ] Tool test: `opencode run -i "Use read tool on GOAL.md…"`
 - [ ] [GOAL.md](../GOAL.md) success criteria

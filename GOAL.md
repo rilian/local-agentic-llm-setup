@@ -2,36 +2,43 @@
 
 ## Summary
 
-**Terminal-first** local coding agent (Ollama + OpenCode + `/loop` script). **ChatGPT** for general GUI chat. **VS Code + Zoo Code** optional — last step, manual plugin install.
+**Terminal-first** local coding agent (Ollama + OpenCode + `/loop` script). **ChatGPT** for general GUI chat.
+
+Optional VS Code sidebar: [docs/setup-zoocode.md](docs/setup-zoocode.md) — not required.
 
 ---
 
 ## Setup automation summary
 
+**Single entry point:** `./scripts/install.sh` — install, verify, upgrade, and repair are all built in.
+
 | Step | What | Automatic? | How |
 |------|------|------------|-----|
 | 0 | Homebrew | Manual once | [brew.sh](https://brew.sh) if missing |
-| 1 | Ollama + service | **Yes** | `./scripts/install.sh` or `brew install ollama` |
-| 2 | Download model (~18 GB) | **Yes** (slow) | script runs `ollama pull` — ~22 min observed |
-| 2b | `llama-server` fix (brew) | **Yes** | `./scripts/fix-llama-server.sh` (also run from `install.sh`) |
-| 3 | OpenCode CLI | **Yes** | `./scripts/install.sh` |
-| 4 | OpenCode → Ollama config | **Yes** | script copies `config/opencode.json.example` |
-| 5 | Terminal daily use | **You run** | `opencode` (approve each action in the UI) |
+| 1 | Ollama + service | **Yes** | `./scripts/install.sh` |
+| 2 | Download model (~18 GB) | **Yes** (slow) | `install.sh` — ~22 min observed |
+| 2b | `llama-server` fix | **Yes** | built into `install.sh` |
+| 2c | Ollama context 32k | **Yes** | built into `install.sh` |
+| 3 | OpenCode CLI | **Yes** | `install.sh` |
+| 4 | OpenCode → Ollama config | **Yes** | built into `install.sh` |
+| 4b | Web search shell env | **Yes** | built into `install.sh` |
+| 5 | Terminal daily use | **You run** | `opencode` |
+| 5b | MCP servers | **You configure** | [SETUP.md Step 5b](docs/SETUP.md) |
 | 6 | `/loop` long tasks | **You run** | `./scripts/loop.sh "task"` |
-| 7 | Pin model version | **Yes** | script creates `config/models.env` |
-| **8** | **VS Code + Zoo Code** | **Manual** | Marketplace install + UI settings — [SETUP.md Step 8](docs/SETUP.md) |
-
-**One command for Steps 1–4 and 7:**
+| 7 | Pin model version | **Yes** | `install.sh` → `config/models.env` |
 
 ```bash
 cd /path/to/local-agentic-llm-setup
-chmod +x scripts/install.sh
+chmod +x scripts/install.sh scripts/loop.sh
 ./scripts/install.sh
 ```
 
-Cannot be fully hands-off: model download time, first-time brew, and **Step 8 require you**.
-
-**Install run 2026-06-04:** Steps 1–7 completed; models `qwen3-coder:30b` + `qwen3-coder-64k` installed. Hit brew `llama-server` gap — fixed via `llama.cpp` symlink (now in `install.sh`).
+| Command | Purpose |
+|---------|---------|
+| `./scripts/install.sh --verify` | Verify (~15s) |
+| `./scripts/install.sh --repair` | Re-apply fixes |
+| `./scripts/install.sh --upgrade` | Upgrade stack |
+| `./scripts/install.sh --check` | Check for updates |
 
 ---
 
@@ -40,8 +47,8 @@ Cannot be fully hands-off: model download time, first-time brew, and **Step 8 re
 - Terminal agent: OpenCode + `scripts/loop.sh` (`/loop`)
 - Shell access: npm, bash, dev servers
 - Privacy-first, local Ollama
-- **Approval-only:** never use `--dangerously-skip-permissions`; approve file edits and shell commands yourself
-- GUI: ChatGPT (general) · Zoo Code in VS Code (optional, Step 8)
+- **Approval-only:** never use `--dangerously-skip-permissions`
+- GUI chat: ChatGPT (general)
 
 ---
 
@@ -49,7 +56,9 @@ Cannot be fully hands-off: model download time, first-time brew, and **Step 8 re
 
 MacBook Pro M4 Pro, 24 GB RAM, ~296 GB free disk.
 
-**Primary model:** `qwen3-coder:30b` (or `qwen3-coder-64k` after Modelfile)
+**Primary model:** `qwen3-coder:30b` at **32k context** (`OLLAMA_CONTEXT_LENGTH=32768`)
+
+Optional: `CREATE_64K=1 ./scripts/install.sh` for `qwen3-coder-64k` (65536 — tight on 24 GB RAM).
 
 Full guide: **[docs/SETUP.md](docs/SETUP.md)**
 
@@ -58,7 +67,6 @@ Full guide: **[docs/SETUP.md](docs/SETUP.md)**
 ## Success criteria
 
 - [ ] `./scripts/install.sh` completes without errors
-- [ ] `ollama list` shows coding model
-- [ ] `./scripts/verify.sh` passes (fast)
-- [ ] Optional: `VERIFY_INFERENCE=1 ./scripts/verify.sh` after first model load
-- [ ] **(Optional Step 8)** Zoo Code in VS Code connected to Ollama
+- [ ] `./scripts/install.sh --verify` passes
+- [ ] `ollama ps` → CONTEXT 32768 (not 4096) after first request
+- [ ] OpenCode tool test: reads a file via tool, not prose

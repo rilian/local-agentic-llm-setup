@@ -1,33 +1,55 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "model": "ollama/qwen3-coder:30b",
+  "default_agent": "build",
   "provider": {
     "ollama": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "Ollama (local)",
       "options": {
-        "baseURL": "http://127.0.0.1:11434/v1"
+        "baseURL": "http://127.0.0.1:11434/v1",
+        "timeout": 600000
       },
       "models": {
         "qwen3-coder:30b": {
           "name": "Qwen3 Coder 30B",
-          "tools": true,
-          "context_length": 65536,
+          "tool_call": true,
+          "context_length": 32768,
           "max_tokens": 8192
         },
         "qwen3-coder:14b": {
           "name": "Qwen3 Coder 14B (fast)",
-          "tools": true,
+          "tool_call": true,
           "context_length": 32768,
           "max_tokens": 8192
         },
         "qwen3-coder-64k": {
-          "name": "Qwen3 Coder 30B (64k ctx)",
-          "tools": true,
+          "name": "Qwen3 Coder 30B (64k ctx, optional)",
+          "tool_call": true,
           "context_length": 65536,
           "max_tokens": 8192
         }
       }
     }
   },
-  "model": "ollama/qwen3-coder:30b"
+  "permission": {
+    "read": "allow",
+    "grep": "allow",
+    "glob": "allow",
+    "list": "allow",
+    "webfetch": "allow",
+    "websearch": "allow",
+    "task": "allow",
+    "bash": "ask",
+    "edit": "ask",
+    "write": "ask",
+    "apply_patch": "ask"
+  },
+  "agent": {
+    "build": {
+      "permission": {
+        "task": "allow"
+      }
+    }
+  }
 }
