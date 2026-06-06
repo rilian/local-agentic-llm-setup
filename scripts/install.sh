@@ -9,7 +9,6 @@
 #   ./scripts/install.sh --upgrade-models  Re-download model weights
 #   ./scripts/install.sh --cleanup    Remove unused HF model cache entries
 #   ./scripts/install.sh --check      Check for available upgrades (no changes)
-#   ./scripts/install.sh --benchmark  Run model speed/quality benchmarks
 # Env vars:
 #   PRIMARY_MODEL=mlx-community/Qwen3.5-9B-OptiQ-4bit
 #   MLX_PORT=8080
@@ -379,7 +378,7 @@ cmd_install() {
   download_model "$PRIMARY_MODEL"
 
   install_opencode_cli
-  chmod +x "$SERVE" "$REPO_ROOT/scripts/loop.sh" "$REPO_ROOT/scripts/benchmark.sh" 2>/dev/null || true
+  chmod +x "$SERVE" "$REPO_ROOT/scripts/loop.sh" 2>/dev/null || true
 
   PRIMARY_MODEL="$PRIMARY_MODEL" MLX_PORT="$MLX_PORT" "$SERVE" start
 
@@ -483,12 +482,6 @@ cmd_upgrade() {
   echo "=============================================="
 }
 
-cmd_benchmark() {
-  local bench="$REPO_ROOT/scripts/benchmark.sh"
-  [[ -x "$bench" ]] || chmod +x "$bench"
-  "$bench" "$@"
-}
-
 case "${1:-}" in
   --verify)         verify_setup ;;
   --repair)         cmd_repair ;;
@@ -496,7 +489,6 @@ case "${1:-}" in
   --upgrade-models) cmd_upgrade_models ;;
   --check)          cmd_check_upgrades ;;
   --cleanup)        cmd_cleanup ;;
-  --benchmark)      shift; cmd_benchmark "$@" ;;
   -h|--help)
     sed -n '2,18p' "$0"
     ;;

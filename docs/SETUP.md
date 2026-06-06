@@ -38,7 +38,6 @@ chmod +x scripts/install.sh scripts/loop.sh scripts/mlx-serve.sh
 | `./scripts/install.sh --verify` | Verify setup (~15s) |
 | `./scripts/install.sh --repair` | Re-apply MLX server + OpenCode config |
 | `./scripts/install.sh --upgrade` | Upgrade mlx-lm + OpenCode |
-| `./scripts/install.sh --benchmark` | Run speed/quality benchmarks |
 | `./scripts/install.sh --upgrade-models` | Re-download model weights |
 | `./scripts/install.sh --cleanup` | Remove unused HuggingFace cache |
 | `./scripts/install.sh --check` | Check for updates |
@@ -242,7 +241,6 @@ Expected:
 | Server status | `./scripts/mlx-serve.sh status` |
 | Restart server | `./scripts/mlx-serve.sh restart` |
 | Re-verify | `./scripts/install.sh --verify` |
-| Benchmark | `./scripts/install.sh --benchmark` |
 | Upgrade | `./scripts/install.sh --upgrade` |
 
-See also: [MODELS.md](MODELS.md) · [UPGRADING.md](UPGRADING.md) · [BENCHMARKS.md](BENCHMARKS.md)
+See also: [MODELS.md](MODELS.md) · [UPGRADING.md](UPGRADING.md)
