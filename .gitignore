@@ -7,3 +7,7 @@ opencode.json
 
 *.pem
 .DS_Store
+results/
+.venv/
+__pycache__/
+*.pyc

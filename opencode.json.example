@@ -1,32 +1,21 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "ollama/qwen3-coder:30b",
+  "model": "mlx/mlx-community/Qwen3.5-9B-OptiQ-4bit",
   "default_agent": "build",
   "provider": {
-    "ollama": {
+    "mlx": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "Ollama (local)",
+      "name": "MLX (local)",
       "options": {
-        "baseURL": "http://127.0.0.1:11434/v1",
+        "baseURL": "http://127.0.0.1:8080/v1",
+        "apiKey": "not-needed",
         "timeout": 600000
       },
       "models": {
-        "qwen3-coder:30b": {
-          "name": "Qwen3 Coder 30B",
+        "mlx-community/Qwen3.5-9B-OptiQ-4bit": {
+          "name": "Qwen3.5 9B OptiQ 4-bit MLX (default)",
           "tool_call": true,
           "context_length": 32768,
-          "max_tokens": 8192
-        },
-        "qwen3-coder:14b": {
-          "name": "Qwen3 Coder 14B (fast)",
-          "tool_call": true,
-          "context_length": 32768,
-          "max_tokens": 8192
-        },
-        "qwen3-coder-64k": {
-          "name": "Qwen3 Coder 30B (64k ctx, optional)",
-          "tool_call": true,
-          "context_length": 65536,
           "max_tokens": 8192
         }
       }
@@ -71,8 +60,8 @@
     "glob": "allow",
     "list": "allow",
     "task": "allow",
-    "webfetch": "ask",
-    "websearch": "ask",
+    "webfetch": "allow",
+    "websearch": "allow",
     "tool": {
       "edit": "ask"
     },

@@ -1,10 +1,10 @@
-# Full Setup: Local Agentic LLM (Mac M4 Pro)
+# Full Setup: Local Agentic LLM with MLX (Mac M4 Pro)
 
-Terminal-first agent: **OpenCode** + **`./scripts/loop.sh`**. **ChatGPT** for general GUI chat.
+Terminal-first agent: **OpenCode** + **native MLX** (`mlx-lm` server) + **`./scripts/loop.sh`**. **ChatGPT** for general GUI chat.
 
 **Hardware:** MacBook Pro M4 Pro, 24 GB RAM.
 
-Optional VS Code sidebar agent (Zoo Code): [setup-zoocode.md](setup-zoocode.md) — not required.
+**Stack:** Models run on Apple MLX via an OpenAI-compatible API at `http://127.0.0.1:8080/v1`.
 
 ---
 
@@ -13,54 +13,42 @@ Optional VS Code sidebar agent (Zoo Code): [setup-zoocode.md](setup-zoocode.md) 
 | Step | Task | Automatic? | Notes |
 |------|------|------------|-------|
 | **0** | Install Homebrew | Manual once | Only if not already installed |
-| **1** | Install Ollama + start service | ✅ Yes | `scripts/install.sh` |
-| **2** | Pull models (30b + 14b) | ✅ Yes, **~25–40 min** | 30b ~18 GB + 14b ~9 GB |
-| **2b** | Fix `llama-server` (brew) | ✅ Yes | `install.sh` (built-in) |
-| **2c** | Ollama context 32k (tools) | ✅ Yes | `install.sh` (built-in) |
-| **3** | Install OpenCode CLI | ✅ Yes | `install.sh` |
-| **4** | Wire OpenCode → Ollama | ✅ Yes | `install.sh` — tool_call, timeout, permissions |
-| **4b** | Web search env | ✅ Yes | `install.sh` → `OPENCODE_ENABLE_EXA=1` in `~/.zshrc` |
-| **5** | Use terminal agent | You run | `opencode` — approve each action |
-| **5b** | Attach MCP servers | You configure | `opencode mcp add` or `opencode.json` — [Step 5b](#step-5b-attach-mcp-servers-optional) |
-| **6** | `/loop` long tasks | You run | `./scripts/loop.sh "…"` |
-| **7** | Pin model in repo | ✅ Yes | Creates `config/models.env` |
+| **1** | Python venv + mlx-lm | ✅ Yes | `scripts/install.sh` |
+| **2** | Download Qwen3.5 9B MLX | ✅ Yes, **~10–20 min** | ~7 GB from HuggingFace |
+| **3** | MLX server (launchd) | ✅ Yes | `scripts/mlx-serve.sh` |
+| **4** | Install OpenCode CLI | ✅ Yes | `install.sh` |
+| **5** | Wire OpenCode → MLX | ✅ Yes | tool_call, timeout, permissions |
+| **5b** | Web search env | ✅ Yes | `OPENCODE_ENABLE_EXA=1` in `~/.zshrc` |
+| **6** | Use terminal agent | You run | `opencode` — approve each action |
+| **7** | `/loop` long tasks | You run | `./scripts/loop.sh "…"` |
+| **8** | Pin model in repo | ✅ Yes | `config/models.env` |
 
-### One-command setup (new machine)
-
-An LLM or you can run **only this**:
+### One-command setup
 
 ```bash
 git clone <this-repo> ~/local-agentic-llm-setup   # if needed
 cd ~/local-agentic-llm-setup
-chmod +x scripts/install.sh scripts/loop.sh
+chmod +x scripts/install.sh scripts/loop.sh scripts/mlx-serve.sh
 ./scripts/install.sh
 ```
-
-**All fixes, config, and verification are built into `install.sh`.** No separate fix scripts.
 
 | Command | Purpose |
 |---------|---------|
 | `./scripts/install.sh` | Full install (new machine) |
 | `./scripts/install.sh --verify` | Verify setup (~15s) |
-| `./scripts/install.sh --repair` | Re-apply fixes (llama-server, context, OpenCode config) |
-| `./scripts/install.sh --upgrade` | Upgrade stack |
-| `./scripts/install.sh --upgrade-models` | Re-pull Qwen models only |
+| `./scripts/install.sh --repair` | Re-apply MLX server + OpenCode config |
+| `./scripts/install.sh --upgrade` | Upgrade mlx-lm + OpenCode |
+| `./scripts/install.sh --benchmark` | Run speed/quality benchmarks |
+| `./scripts/install.sh --upgrade-models` | Re-download model weights |
+| `./scripts/install.sh --cleanup` | Remove unused HuggingFace cache |
 | `./scripts/install.sh --check` | Check for updates |
+| `./scripts/mlx-serve.sh start\|stop\|status\|logs` | Manage MLX server |
 
-Optional env vars:
+**What still needs you:**
 
-```bash
-SKIP_FAST=1 ./scripts/install.sh        # skip 14b (~9 GB) if disk is tight
-CREATE_64K=1 ./scripts/install.sh       # optional 64k Modelfile (65536 — tight on 24 GB RAM)
-PRIMARY_MODEL=qwen3-coder:14b ./scripts/install.sh   # 14b only as primary (smaller machine)
-```
-
-An agent (or you) **can** run `./scripts/install.sh` end-to-end. What still needs **you**:
-
-1. Homebrew absent → install from brew.sh first
+1. Homebrew absent → install from [brew.sh](https://brew.sh) first
 2. Model download → wait (network + disk)
-
-**Observed on this machine (2026-06-04):** full `install.sh` ~22 min; first Ollama inference ~2 min (model load into RAM).
+3. First inference → model loads into RAM (~30–90s)
 
 ---
 
@@ -72,7 +60,8 @@ An agent (or you) **can** run `./scripts/install.sh` end-to-end. What still need
   └── ./scripts/loop.sh
             │
             ▼
-     Ollama :11434  ←  qwen3-coder:30b (default) · qwen3-coder:14b (fast)
+  mlx-lm server :8080/v1  ←  mlx-community/Qwen3.5-9B-OptiQ-4bit
+  (Apple MLX, launchd)
 ```
 
 Use VS Code as your editor; run OpenCode in the integrated terminal (`cd project && opencode`).
@@ -89,523 +78,171 @@ Skip if `brew --version` works.
 
 ---
 
-## Steps 1–7: Automated (`./scripts/install.sh`)
+## Steps 1–8: Automated (`./scripts/install.sh`)
 
-The install script performs:
+The install script:
 
-1. `brew install ollama` + `brew services start ollama`
-2. Set `OLLAMA_CONTEXT_LENGTH=32768` and `OLLAMA_KEEP_ALIVE=-1` in launchd plist
-3. `ollama pull qwen3-coder:30b` + fast model `qwen3-coder:14b` (from `freehuntx/qwen3-coder:14b`, aliased locally)
-4. `brew install anomalyco/tap/opencode` (or curl installer fallback)
-5. Copy `opencode.json.example` → `~/.config/opencode/opencode.json` (default model: `qwen3-coder:30b`; 14b also configured)
-6. Copy `config/models.env.example` → `config/models.env`
-7. `chmod +x scripts/loop.sh`
+1. Creates `.venv` and installs `mlx`, `mlx-lm`, `huggingface_hub`
+2. Downloads `mlx-community/Qwen3.5-9B-OptiQ-4bit` (~8 GB)
+3. Installs a launchd agent (`ai.local.mlx-server`) on port 8080
+4. Installs OpenCode CLI
+5. Writes `~/.config/opencode/opencode.json` (MLX provider)
+6. Sets `OPENCODE_ENABLE_EXA=1` in `~/.zshrc`
+7. Creates `config/models.env`
 
-Optional: `CREATE_64K=1 ./scripts/install.sh` also creates `qwen3-coder-64k` (65536 context — tight on 24 GB RAM).
-
-### Manual equivalent (same steps)
+### Manual equivalent
 
 <details>
 <summary>Expand if you prefer running commands yourself</summary>
 
 ```bash
-brew install ollama node
-brew services start ollama
+brew install python node
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 
-ollama pull qwen3-coder:30b
-ollama pull freehuntx/qwen3-coder:14b
-ollama cp freehuntx/qwen3-coder:14b qwen3-coder:14b
+# Download model
+.venv/bin/python -c "from huggingface_hub import snapshot_download; snapshot_download('mlx-community/Qwen3.5-9B-OptiQ-4bit')"
 
-# Default: 32k context via OLLAMA_CONTEXT_LENGTH=32768 (install.sh sets this)
-# Optional 64k Modelfile (tight on 24 GB RAM):
-# CREATE_64K=1 ./scripts/install.sh
+# Start MLX server
+./scripts/mlx-serve.sh start
 
+# OpenCode
 brew install anomalyco/tap/opencode
-mkdir -p ~/.config/opencode
 cp opencode.json.example ~/.config/opencode/opencode.json
 
-cp config/models.env.example config/models.env
-chmod +x scripts/loop.sh
+# Verify
+./scripts/install.sh --verify
 ```
 
 </details>
 
-### Verify Steps 1–7 (fast — no model load)
+---
+
+## Choosing a model (Qwen3.5 9B OptiQ MLX)
+
+| Model | Size | RAM | Role |
+|-------|------|-----|------|
+| `mlx-community/Qwen3.5-9B-OptiQ-4bit` | ~7 GB | ~9 GB | **Default** |
+
+To use a different MLX model:
 
 ```bash
-./scripts/install.sh --verify
+PRIMARY_MODEL=mlx-community/Qwen3-8B-4bit ./scripts/install.sh --repair
 ```
 
-This checks Ollama API, `llama-server` binary, **OLLAMA_CONTEXT_LENGTH=32768**, OpenCode tool config (`tool_call`, `websearch`, `task`), models, and a **10-second runtime probe**.
-
-Optional full inference test (~2 min first load):
-
-```bash
-VERIFY_INFERENCE=1 ./scripts/install.sh --verify
-```
-
-Manual checks:
-
-```bash
-curl -s http://127.0.0.1:11434/api/tags | head
-ollama list
-opencode --version
-```
-
-If you see `llama-server binary not found`:
-
-```bash
-./scripts/install.sh --repair
-./scripts/install.sh --verify
-```
-
-Do **not** use `ollama run … "setup ok"` as a quick test — the 30B model takes ~2 min to load on first run. Use `./scripts/install.sh --verify` instead.
+See [MODELS.md](MODELS.md) for alternatives.
 
 ---
 
-## Approval-only policy
-
-This setup **never** uses `--dangerously-skip-permissions`. You approve every file edit and shell command.
-
-| Tool | How approvals work |
-|------|-------------------|
-| **OpenCode TUI** | Run `opencode` → approve/deny each tool call in the UI |
-| **OpenCode one-shot** | `opencode run -i "…"` → same prompts in split-footer mode |
-| **loop.sh** | Uses `opencode run -i` each iteration — stay at the terminal to approve |
-
-Do **not** pass `--dangerously-skip-permissions`.
-
-## Step 5: Daily terminal use
-
-Open VS Code for editing, then use the integrated terminal:
+## Daily use
 
 ```bash
-cd /path/to/your/project
-source ~/.zshrc    # once per session (web search)
-opencode
+source ~/.zshrc          # once per terminal session
+./scripts/mlx-serve.sh status   # confirm API is up
+opencode                 # start agent (approval-only)
 ```
 
-Approve each file edit and shell command when OpenCode asks.
+Switch model in session: `/models` in the OpenCode TUI.
 
-One-shot (interactive — you approve tool use):
+Quality/long task:
 
 ```bash
-opencode run -i "Run npm test and summarize"
+./scripts/loop.sh "Refactor auth module — LOOP_COMPLETE when tests pass"
 ```
-
-Chat-only (no tools, no approval needed):
-
-```bash
-opencode run "Explain what this repo does in one paragraph"
-```
-
-Guided first launch (alternative to manual config):
-
-```bash
-ollama launch opencode
-```
-
-### Performance tips (local models)
-
-`install.sh` sets **`OLLAMA_KEEP_ALIVE=-1`** so the model stays in RAM after first use — no ~1–2 min reload when you restart `opencode`.
-
-| Habit | Why |
-|-------|-----|
-| **Keep one `opencode` session open** | Avoid `Ctrl+C` — restarting loses context |
-| **Use 14b for quick work, 30b for hard tasks** | See [Choosing a model](#choosing-a-model-30b-vs-14b) below |
-| **Pre-warm once per day** (optional) | `ollama run qwen3-coder:30b "hi"` if nothing loaded yet |
-| **Focused prompts** | *"Fix auth.ts validateToken"* beats *"review entire codebase"* |
-| **`@explore` for search** | Read-only subagent — less context than reading many files |
-| **Limit MCPs** | Disable servers you are not using |
-
-First message after a cold start is slowest (~30s for 14b, ~1–2 min for 30b). After warm, expect seconds to ~30s per turn.
-
-### Choosing a model (30b vs 14b)
-
-Both models are installed by `./scripts/install.sh`. **Default is 30b** — best quality for complex agent work.
-
-> **Note:** Ollama's official library has no `qwen3-coder:14b`. Install pulls `freehuntx/qwen3-coder:14b` and creates a local alias `qwen3-coder:14b` for OpenCode.
-
-| Model | Size | Speed | Use for |
-|-------|------|-------|---------|
-| `qwen3-coder:30b` | ~18 GB | Slower | Refactors, multi-file edits, hard bugs, `/loop` |
-| `qwen3-coder:14b` | ~9 GB | ~2× faster | Quick fixes, single-file edits, exploration, chat |
-
-**Start OpenCode with a specific model:**
-
-```bash
-opencode                              # default: 30b (from opencode.json)
-opencode --model ollama/qwen3-coder:14b    # fast session
-opencode --model ollama/qwen3-coder:30b    # explicit 30b
-```
-
-**Switch mid-session** (inside the TUI):
-
-```text
-/models          # or Ctrl+x m — pick ollama/qwen3-coder:14b or :30b
-```
-
-**One-shot with 14b:**
-
-```bash
-opencode run -i -m ollama/qwen3-coder:14b "Add a type annotation to parseUser in auth.ts"
-```
-
-**Practical workflow:**
-
-1. Morning: `opencode --model ollama/qwen3-coder:14b` for quick tasks through the day
-2. Hard problem: `/models` → switch to `qwen3-coder:30b`, or start a new session with `opencode --model ollama/qwen3-coder:30b`
-3. Long autonomous work: `./scripts/loop.sh "…"` (uses 30b from config)
-
-List installed models: `ollama list` · OpenCode model names: `opencode models ollama`
 
 ---
 
 ## Step 5b: Attach MCP servers (optional)
 
-OpenCode can use **Model Context Protocol (MCP)** servers — the same kind of tools you may already have in Cursor or Claude Desktop. Once attached, MCP tools appear alongside built-in tools (file edit, bash, etc.) and still require **your approval** per action.
+OpenCode supports MCP servers for GitHub, Sentry, Context7, etc. Edit `~/.config/opencode/opencode.json` or use `opencode mcp add`.
 
-Official reference: [OpenCode MCP docs](https://open-code.ai/en/docs/mcp-servers)
+The template in `opencode.json.example` includes disabled MCP stubs. Enable and set env vars as needed.
 
-### Where config lives
-
-| Scope | File |
-|-------|------|
-| **Global** (all projects) | `~/.config/opencode/opencode.json` |
-| **Project** (one repo) | `./opencode.json` (copy from [opencode.json.example](../opencode.json.example)) |
-
-MCP examples (Foundry, GitHub, Context7, Sentry) are in [opencode.json.example](../opencode.json.example) under `"mcp"` — copy the block you need into global or project config and set `"enabled": true`.
-
-### Option A — Interactive wizard (easiest)
-
-```bash
-opencode mcp add
-```
-
-Follow prompts for a **local** (stdio) or **remote** (URL) server.
-
-Then verify:
-
-```bash
-opencode mcp list
-opencode mcp debug my-server-name   # if connection fails
-opencode mcp auth my-server-name    # OAuth servers (e.g. Sentry)
-```
-
-Restart OpenCode (`opencode` TUI) after adding servers.
-
-### Option B — Edit `opencode.json` manually
-
-**Local MCP** (stdio — most npm/npx servers):
-
-```json
-{
-  "mcp": {
-    "github": {
-      "type": "local",
-      "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
-      "enabled": true,
-      "environment": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "{env:GITHUB_PERSONAL_ACCESS_TOKEN}"
-      }
-    }
-  }
-}
-```
-
-**Remote MCP** (HTTP URL):
-
-```json
-{
-  "mcp": {
-    "context7": {
-      "type": "remote",
-      "url": "https://mcp.context7.com/mcp",
-      "enabled": true,
-      "headers": {
-        "CONTEXT7_API_KEY": "{env:CONTEXT7_API_KEY}"
-      }
-    }
-  }
-}
-```
-
-Use `{env:VAR_NAME}` for secrets — set them in your shell or `.env`, not in the JSON file.
-
-### Port existing MCPs from Cursor / Claude Desktop
-
-Cursor and Claude Desktop use `mcpServers` in JSON. OpenCode uses `mcp` with a slightly different shape:
-
-| Cursor / Claude Desktop | OpenCode |
-|-------------------------|----------|
-| `"mcpServers": { "name": { … } }` | `"mcp": { "name": { … } }` |
-| `"command": "npx"` + `"args": ["-y", "pkg"]` | `"command": ["npx", "-y", "pkg"]` |
-| `"env": { "KEY": "val" }` | `"environment": { "KEY": "val" }` |
-| `"url": "https://…"` (remote) | `"type": "remote", "url": "https://…"` |
-| (implicit) | add `"type": "local"` for command-based servers |
-| (implicit) | add `"enabled": true` |
-
-**Example — Cursor `~/.cursor/mcp.json`:**
-
-```json
-{
-  "mcpServers": {
-    "github": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_…"
-      }
-    }
-  }
-}
-```
-
-**Same server in OpenCode** (`~/.config/opencode/opencode.json`):
-
-```json
-{
-  "mcp": {
-    "github": {
-      "type": "local",
-      "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
-      "enabled": true,
-      "environment": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "{env:GITHUB_PERSONAL_ACCESS_TOKEN}"
-      }
-    }
-  }
-}
-```
-
-Export the token in your shell before starting OpenCode:
-
-```bash
-export GITHUB_PERSONAL_ACCESS_TOKEN="ghp_…"
-opencode
-```
-
-### Using MCP tools in prompts
-
-MCP tools are registered with the server name as prefix. Mention the server in your prompt:
-
-```
-List my open GitHub issues for this repo. use github
-```
-
-Or add guidance to an `AGENTS.md` in your project:
-
-```markdown
-When you need library docs, use the context7 MCP tools.
-```
-
-### Enable / disable MCP tools
-
-Disable a server without removing config:
-
-```json
-{
-  "mcp": {
-    "github": { "type": "local", "command": ["…"], "enabled": false }
-  }
-}
-```
-
-Disable all tools from a server globally (useful when you have many MCPs):
-
-```json
-{
-  "tools": {
-    "github_*": false
-  }
-}
-```
-
-Re-enable per agent if needed — see [OpenCode MCP docs](https://open-code.ai/en/docs/mcp-servers).
-
-### Tips for local 30B model (24 GB RAM)
-
-- Each MCP adds tool definitions to context — **enable only what you need**
-- Heavy MCPs (GitHub, large DB schemas) can crowd out code context
-- Prefer 1–2 MCPs per task; disable the rest with `"enabled": false`
-
-### Verify MCP setup
-
-```bash
-opencode mcp list          # should show your servers
-cd /path/to/project && opencode
-# ask: "What MCP tools do you have available?"
-```
-
-Approve MCP tool calls the same way as file edits and bash commands.
+**Tip:** Fewer enabled MCPs = faster turns. Disable unused MCPs for daily coding.
 
 ---
 
-## Step 5c: Tools, web search, subagents (required for agent work)
+## OpenCode config essentials
 
-If the model **chatters but never reads files, runs bash, or calls MCPs**, Ollama is almost certainly using a **4096-token context** — too small to fit tool definitions. This is the #1 local-agent failure mode.
+The install script sets:
 
-### One-command fix (also runs automatically from `./scripts/install.sh`)
+- **Provider:** `mlx` → `http://127.0.0.1:8080/v1`
+- **Model:** `mlx/mlx-community/Qwen3.5-9B-OptiQ-4bit`
+- **Agent:** `build` with `tool_call: true`
+- **Permissions:** read/grep/websearch allowed; edit/bash/write require approval
+- **Timeout:** 600000 ms (10 min) for long agent turns
 
-```bash
-cd ~/work/local-agentic-llm-setup
-./scripts/install.sh          # full install — includes all fixes below
-# or re-apply fixes only:
-./scripts/install.sh --repair # llama-server + context 32k
-./scripts/install.sh --verify # auto-checks context, tool config, web search env
-```
-
-Add to `~/.zshrc` (done automatically by `install.sh`; only if missing):
-
-```bash
-export OPENCODE_ENABLE_EXA=1
-source ~/.zshrc
-```
-
-### Verify context (must NOT be 4096)
-
-```bash
-ollama run qwen3-coder:30b "hi"    # warm the model (~2 min first time)
-ollama ps                          # CONTEXT column should show 32768
-```
-
-### Verify tool calling
-
-```bash
-cd ~/work/local-agentic-llm-setup
-opencode run -i "Use the read tool on GOAL.md and quote the first line verbatim"
-```
-
-You should see a **tool call** (read) and an approval prompt — not just prose about what it would do.
-
-### Web search
-
-Built-in `websearch` (Exa) requires `OPENCODE_ENABLE_EXA=1` when using Ollama (see above). Test:
-
-```
-Search the web for OpenCode release notes. use websearch
-```
-
-`webfetch` works for known URLs without Exa.
-
-### Subagents
-
-OpenCode **build** agent can delegate to subagents via the **task** tool, or you invoke them directly:
-
-| Subagent | Use for |
-|----------|---------|
-| `@explore` | Read-only codebase search (grep, glob, read) |
-| `@general` | General subtasks |
-| `@scout` | Fast exploration |
-
-Example:
-
-```
-@explore Find where install.sh sets up Ollama and summarize in 3 bullets
-```
-
-Subagents only work if the **primary model calls tools** — fix context first (Step 5c above).
-
----
-
-## Step 6: `/loop` long tasks
-
-```bash
-./scripts/loop.sh "Refactor auth: npm install, tests, README — LOOP_COMPLETE when done"
-./scripts/loop.sh --max 40 "larger task"
-```
-
-Each iteration runs `opencode run -i` — **stay at the terminal** and approve actions as they appear. Uses [prompts/loop.md](../prompts/loop.md).
-
----
-
-## Updating the stack
-
-See **[UPGRADING.md](UPGRADING.md)** for monitoring Qwen releases and upgrade routines.
-
-```bash
-./scripts/install.sh --check              # check tools + model digests (no downloads)
-./scripts/install.sh --upgrade-models     # re-pull Qwen 30b + 14b only
-./scripts/install.sh --upgrade            # full stack: brew + models + config
-SKIP_MODELS=1 ./scripts/install.sh --upgrade
-OLLAMA_CONTEXT=65536 ./scripts/install.sh --upgrade   # 64k context (24 GB — tight)
-```
-
-```bash
-ollama pull qwen3-coder:30b
-ollama rm old-tag
-```
-
-Also update `~/.config/opencode/opencode.json` → `"model"` field (or `./scripts/install.sh --repair`).
+Thinking mode is disabled server-side (`enable_thinking: false`) for faster, direct replies.
 
 ---
 
 ## Troubleshooting
 
-| Problem | Fix |
-|---------|-----|
-| `llama-server binary not found` | `./scripts/install.sh --repair` then `./scripts/install.sh --verify` |
-| Ollama not running | `brew services start ollama` |
-| First inference ~2 min | Normal — 30B model loading into RAM |
-| OpenCode permission prompts | Expected — approve or deny in the UI; never use `--dangerously-skip-permissions` |
-| Model talks but never uses tools | `./scripts/install.sh --repair` |
-| `ollama ps` shows CONTEXT 4096 | `./scripts/install.sh --repair` |
-| Web search unavailable | `export OPENCODE_ENABLE_EXA=1` before `opencode` |
-| MCP server not connecting | `opencode mcp list` · `opencode mcp debug <name>` · check `command`/`url` in config |
-| Loop stops early | `./scripts/loop.sh --max 50 "…"` |
-
-### `llama-server binary not found` (Homebrew Ollama 0.30+)
-
-Homebrew Ollama does not bundle `llama-server`; GGUF models fail without this fix.
-
-**One command:**
+### MLX API not responding
 
 ```bash
-./scripts/install.sh --repair
+./scripts/mlx-serve.sh status
+./scripts/mlx-serve.sh logs
+./scripts/mlx-serve.sh restart
+```
+
+First start after download loads weights into RAM — can take 30–90 seconds before chat works.
+
+### OpenCode can't reach model
+
+1. Confirm API: `curl http://127.0.0.1:8080/v1/models`
+2. Re-apply config: `./scripts/install.sh --repair`
+3. Model ID in OpenCode must match server: `mlx-community/Qwen3.5-9B-OptiQ-4bit`
+
+### Slow first prompt
+
+Normal — cold load loads ~8 GB into unified memory. Subsequent prompts are much faster.
+
+### Out of memory
+
+Use a smaller model:
+
+```bash
+PRIMARY_MODEL=mlx-community/Qwen3-8B-4bit ./scripts/install.sh --repair
+```
+
+### HuggingFace rate limits
+
+Set a token for faster downloads:
+
+```bash
+export HF_TOKEN=hf_...   # https://huggingface.co/settings/tokens
+./scripts/install.sh --upgrade-models
+```
+
+---
+
+## Verification
+
+```bash
 ./scripts/install.sh --verify
+VERIFY_INFERENCE=1 ./scripts/install.sh --verify   # includes live chat test
 ```
 
-**Manual equivalent:**
+Expected:
 
-```bash
-brew install llama.cpp
-OLLAMA_VER=$(ollama --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-BREW_PREFIX=$(brew --prefix)
-mkdir -p "${BREW_PREFIX}/Cellar/ollama/${OLLAMA_VER}/libexec/lib/ollama"
-ln -sf "$(which llama-server)" "${BREW_PREFIX}/Cellar/ollama/${OLLAMA_VER}/libexec/lib/ollama/llama-server"
-brew services restart ollama   # required — daemon must restart to pick up the binary
-```
-
-Re-run after `brew upgrade ollama`. **Alternative:** use [Ollama.app](https://ollama.com/download) instead of brew.
+- MLX API on `:8080`
+- LaunchAgent loaded
+- OpenCode config with MLX provider + tool_call
+- Optional: inference returns "setup ok"
 
 ---
 
 ## Quick reference
 
-| Item | Value |
-|------|-------|
-| Auto install | `./scripts/install.sh` |
-| Upgrade | `./scripts/install.sh --upgrade` · [UPGRADING.md](UPGRADING.md) |
-| Upgrade models | `./scripts/install.sh --upgrade-models` |
-| Check updates | `./scripts/install.sh --check` |
-| Verify | `./scripts/install.sh --verify` |
-| Repair fixes | `./scripts/install.sh --repair` |
-| Web search | `OPENCODE_ENABLE_EXA=1 opencode` |
-| Ollama API | `http://127.0.0.1:11434` |
-| Terminal agent | `opencode` (approve each action) |
-| Fast session | `opencode --model ollama/qwen3-coder:14b` |
-| Switch model (TUI) | `/models` or `Ctrl+x m` |
-| Long task | `./scripts/loop.sh "…"` |
-| OpenCode config | `~/.config/opencode/opencode.json` · [opencode.json.example](../opencode.json.example) |
-| MCP commands | `opencode mcp add` · `opencode mcp list` |
-| Optional Zoo Code | [setup-zoocode.md](setup-zoocode.md) |
+| Task | Command |
+|------|---------|
+| Start agent | `opencode` |
+| Long task | `./scripts/loop.sh "task"` |
+| Server status | `./scripts/mlx-serve.sh status` |
+| Restart server | `./scripts/mlx-serve.sh restart` |
+| Re-verify | `./scripts/install.sh --verify` |
+| Benchmark | `./scripts/install.sh --benchmark` |
+| Upgrade | `./scripts/install.sh --upgrade` |
 
----
-
-## Checklist (in order)
-
-- [ ] Step 0: Homebrew installed
-- [ ] Steps 1–7: `./scripts/install.sh` succeeded
-- [ ] Fast verify: `./scripts/install.sh --verify`
-- [ ] Tool test: `opencode run -i "Use read tool on GOAL.md…"`
-- [ ] [GOAL.md](../GOAL.md) success criteria
+See also: [MODELS.md](MODELS.md) · [UPGRADING.md](UPGRADING.md) · [BENCHMARKS.md](BENCHMARKS.md)

@@ -1,46 +1,54 @@
 #!/usr/bin/env bash
-# Local Agentic LLM — single setup entry point (Mac, Homebrew + Ollama + OpenCode).
+# Local Agentic LLM — MLX + OpenCode setup (Mac Apple Silicon).
 #
 # Usage (see docs/SETUP.md):
 #   ./scripts/install.sh              Full install on a new machine
-#   ./scripts/install.sh --verify     Verify setup (~15s, no model load)
-#   ./scripts/install.sh --upgrade      Upgrade tools + models + re-apply fixes
-#   ./scripts/install.sh --upgrade-models  Re-pull Qwen models only (see docs/UPGRADING.md)
-#   ./scripts/install.sh --check        Check for available upgrades (no changes)
-#   ./scripts/install.sh --repair       Re-apply fixes only (llama-server, context, config)
-#
-# Env vars (install / upgrade):
-#   PRIMARY_MODEL=qwen3-coder:30b
-#   SKIP_FAST=1        Skip pulling FAST_MODEL (qwen3-coder:14b)
-#   CREATE_64K=1         Optional: create qwen3-coder-64k Modelfile (65536 — tight on 24 GB RAM)
-#   SKIP_MODELS=1        Upgrade: skip ollama pull
-#   SKIP_BREW=1          Upgrade: skip brew upgrades
-#   OLLAMA_CONTEXT=32768 Context length (default 32768)
-#   OLLAMA_KEEP_ALIVE=-1  Keep model loaded (-1 = never unload; default -1)
-#   VERIFY_INFERENCE=1   Verify: slow full inference test (~2 min)
+#   ./scripts/install.sh --verify     Verify setup (~15s)
+#   ./scripts/install.sh --repair     Re-apply MLX server + OpenCode config
+#   ./scripts/install.sh --upgrade    Upgrade Python deps + OpenCode + model
+#   ./scripts/install.sh --upgrade-models  Re-download model weights
+#   ./scripts/install.sh --cleanup    Remove unused HF model cache entries
+#   ./scripts/install.sh --check      Check for available upgrades (no changes)
+#   ./scripts/install.sh --benchmark  Run model speed/quality benchmarks
+# Env vars:
+#   PRIMARY_MODEL=mlx-community/Qwen3.5-9B-OptiQ-4bit
+#   MLX_PORT=8080
+#   MLX_MAX_TOKENS=8192
+#   SKIP_MODELS=1                  Upgrade: skip model re-download
+#   SKIP_BREW=1                    Upgrade: skip brew upgrades
+#   VERIFY_INFERENCE=1             Verify: slow full inference test (~1 min)
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+VENV="${REPO_ROOT}/.venv"
+PYTHON="${VENV}/bin/python"
+PIP="${VENV}/bin/pip"
+SERVE="${REPO_ROOT}/scripts/mlx-serve.sh"
 
-PRIMARY_MODEL="${PRIMARY_MODEL:-qwen3-coder:30b}"
-FAST_MODEL="${FAST_MODEL:-qwen3-coder:14b}"
-# Official library has no qwen3-coder:14b — pull community build, alias locally
-FAST_MODEL_SOURCE="${FAST_MODEL_SOURCE:-freehuntx/qwen3-coder:14b}"
-CONTEXT_MODEL="${CONTEXT_MODEL:-qwen3-coder-64k}"
-PULL_FAST="${PULL_FAST:-}"  # deprecated alias for SKIP_FAST=0
-SKIP_FAST="${SKIP_FAST:-0}"
-CREATE_64K="${CREATE_64K:-0}"
+_CLI_MODEL="${PRIMARY_MODEL:-}"
+_CLI_OPENCODE_MODEL="${OPENCODE_MODEL_ID:-}"
+MLX_HOST="${MLX_HOST:-127.0.0.1}"
+MLX_PORT="${MLX_PORT:-8080}"
+MLX_MAX_TOKENS="${MLX_MAX_TOKENS:-8192}"
+MLX_CHAT_TEMPLATE_ARGS='{"enable_thinking":false}'
+MLX_API_BASE="http://${MLX_HOST}:${MLX_PORT}"
 SKIP_MODELS="${SKIP_MODELS:-0}"
 SKIP_BREW="${SKIP_BREW:-0}"
-OLLAMA_CONTEXT="${OLLAMA_CONTEXT:-32768}"
-OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:--1}"
 VERIFY_INFERENCE="${VERIFY_INFERENCE:-0}"
-MIN_CONTEXT="${MIN_CONTEXT:-32768}"
+AGENT_CONTEXT_LENGTH="${AGENT_CONTEXT_LENGTH:-32768}"
 
 if [[ -f "$REPO_ROOT/config/models.env" ]]; then
   # shellcheck disable=SC1091
   source "$REPO_ROOT/config/models.env"
+fi
+PRIMARY_MODEL="${_CLI_MODEL:-${PRIMARY_MODEL:-mlx-community/Qwen3.5-9B-OptiQ-4bit}}"
+OPENCODE_MODEL_ID="${_CLI_OPENCODE_MODEL:-${OPENCODE_MODEL_ID:-$PRIMARY_MODEL}}"
+if [[ "$PRIMARY_MODEL" != */* ]]; then
+  PRIMARY_MODEL="mlx-community/Qwen3.5-9B-OptiQ-4bit"
+fi
+if [[ "$MLX_CHAT_TEMPLATE_ARGS" != *'"'* ]]; then
+  MLX_CHAT_TEMPLATE_ARGS='{"enable_thinking":false}'
 fi
 
 log()  { echo "==> $*"; }
@@ -48,99 +56,38 @@ warn() { echo "WARNING: $*" >&2; }
 die()  { echo "ERROR: $*" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
-# Ollama helpers
+# MLX helpers
 # ---------------------------------------------------------------------------
 
-wait_for_ollama() {
-  for _ in {1..30}; do
-    curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1 && return 0
-    sleep 1
+wait_for_mlx() {
+  local i
+  for i in {1..60}; do
+    curl -sf --max-time 3 "${MLX_API_BASE}/v1/models" >/dev/null 2>&1 && return 0
+    sleep 2
   done
-  die "Ollama API not responding on :11434"
+  die "MLX API not responding on ${MLX_API_BASE}/v1"
 }
 
-llama_server_target() {
-  local brew_prefix ollama_ver
-  brew_prefix="$(brew --prefix)"
-  ollama_ver="$(ollama --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-  echo "${brew_prefix}/Cellar/ollama/${ollama_ver}/libexec/lib/ollama/llama-server"
-}
-
-llama_server_resolves() {
-  local target
-  target="$(llama_server_target)"
-  [[ -x "$target" ]] && return 0
-  [[ -L "$target" ]] && command -v llama-server >/dev/null && [[ -x "$(command -v llama-server)" ]]
-}
-
-fix_llama_server() {
-  local target
-  target="$(llama_server_target)"
-
-  if ! command -v llama-server >/dev/null 2>&1 || ! llama_server_resolves; then
-    log "Installing llama.cpp (Homebrew Ollama needs llama-server for GGUF)..."
-    brew install llama.cpp
-    mkdir -p "$(dirname "$target")"
-    ln -sf "$(command -v llama-server)" "$target"
-    log "Linked llama-server → $target"
-  else
-    log "llama-server OK at $target"
+ensure_venv() {
+  if [[ ! -x "$PYTHON" ]]; then
+    log "Creating Python venv at .venv..."
+    python3 -m venv "$VENV"
   fi
-
-  log "Restarting Ollama..."
-  brew services restart ollama
-  wait_for_ollama
-
-  llama_server_resolves || die "llama-server still not usable at $target"
+  log "Installing/upgrading MLX dependencies..."
+  "$PIP" install -U pip -q
+  "$PIP" install -r "$REPO_ROOT/requirements.txt" -q
+  log "mlx-lm $("$PYTHON" -c "import mlx_lm; print(mlx_lm.__version__)" 2>/dev/null || echo unknown)"
 }
 
-fix_ollama_context() {
-  local ctx="${1:-$OLLAMA_CONTEXT}"
-  local keep_alive="${2:-$OLLAMA_KEEP_ALIVE}"
-  local plist="${HOME}/Library/LaunchAgents/homebrew.mxcl.ollama.plist"
-
-  [[ -f "$plist" ]] || die "Ollama plist not found — install Ollama via Homebrew first"
-
-  set_plist_env() {
-    local key="$1" value="$2"
-    if /usr/libexec/PlistBuddy -c "Print :EnvironmentVariables:$key" "$plist" >/dev/null 2>&1; then
-      /usr/libexec/PlistBuddy -c "Set :EnvironmentVariables:$key $value" "$plist"
-    else
-      /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:$key string $value" "$plist"
-    fi
-  }
-
-  apply_ollama_env() {
-    set_plist_env OLLAMA_CONTEXT_LENGTH "$ctx"
-    set_plist_env OLLAMA_KEEP_ALIVE "$keep_alive"
-  }
-
-  reload_ollama_service() {
-    launchctl bootout "gui/$(id -u)/homebrew.mxcl.ollama" 2>/dev/null || \
-      launchctl unload "$plist" 2>/dev/null || true
-    launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null || \
-      launchctl load "$plist"
-  }
-
-  log "Setting OLLAMA_CONTEXT_LENGTH=$ctx OLLAMA_KEEP_ALIVE=$keep_alive"
-  apply_ollama_env
-  brew services restart ollama
-  log "Re-applying env (brew restart resets plist)..."
-  apply_ollama_env
-  reload_ollama_service
-  wait_for_ollama
-
-  local actual_ctx actual_keep
-  actual_ctx="$(/usr/libexec/PlistBuddy -c "Print :EnvironmentVariables:OLLAMA_CONTEXT_LENGTH" "$plist" 2>/dev/null || echo "")"
-  actual_keep="$(/usr/libexec/PlistBuddy -c "Print :EnvironmentVariables:OLLAMA_KEEP_ALIVE" "$plist" 2>/dev/null || echo "")"
-  [[ "$actual_ctx" == "$ctx" ]] || die "OLLAMA_CONTEXT_LENGTH not persisted (got: ${actual_ctx:-unset})"
-  [[ "$actual_keep" == "$keep_alive" ]] || die "OLLAMA_KEEP_ALIVE not persisted (got: ${actual_keep:-unset})"
-  log "OLLAMA_CONTEXT_LENGTH=$ctx OLLAMA_KEEP_ALIVE=$keep_alive verified"
-}
-
-ensure_ollama_post_install() {
-  fix_llama_server
-  fix_ollama_context "$OLLAMA_CONTEXT"
+download_model() {
+  local model="$1"
+  log "Downloading ${model} (HuggingFace → ~/.cache/huggingface)..."
+  "$PYTHON" - "$model" <<'PY'
+import sys
+from huggingface_hub import snapshot_download
+snapshot_download(sys.argv[1])
+print("Download complete:", sys.argv[1])
+PY
 }
 
 # ---------------------------------------------------------------------------
@@ -150,7 +97,7 @@ ensure_ollama_post_install() {
 configure_opencode() {
   local example="$REPO_ROOT/opencode.json.example"
   local target="${OPENCODE_CONFIG:-$HOME/.config/opencode/opencode.json}"
-  local model_for_config="${MODEL_FOR_CONFIG:-$PRIMARY_MODEL}"
+  local model_for_config="${MODEL_FOR_CONFIG:-$OPENCODE_MODEL_ID}"
   local existing=""
 
   [[ -f "$example" ]] || die "Missing $example"
@@ -162,15 +109,21 @@ configure_opencode() {
     log "Backed up existing OpenCode config"
   fi
 
-  python3 - "$example" "$target" "$existing" "$model_for_config" <<'PY'
+  python3 - "$example" "$target" "$existing" "$model_for_config" "$MLX_API_BASE" <<'PY'
 import json, sys
-example_path, target_path, existing_path, model_for_config = sys.argv[1:5]
+example_path, target_path, existing_path, model_id, api_base = sys.argv[1:6]
 with open(example_path) as f:
     cfg = json.load(f)
-if model_for_config == "qwen3-coder-64k":
-    cfg["model"] = "ollama/qwen3-coder-64k"
-else:
-    cfg["model"] = f"ollama/{model_for_config}"
+cfg["model"] = f"mlx/{model_id}"
+cfg["provider"]["mlx"]["options"]["baseURL"] = f"{api_base.rstrip('/')}/v1"
+cfg["provider"]["mlx"]["options"]["apiKey"] = "not-needed"
+if model_id not in cfg["provider"]["mlx"]["models"]:
+    cfg["provider"]["mlx"]["models"][model_id] = {
+        "name": "Qwen3.5 9B OptiQ 4-bit MLX",
+        "tool_call": True,
+        "context_length": 32768,
+        "max_tokens": 8192,
+    }
 if existing_path:
     try:
         with open(existing_path) as f:
@@ -183,7 +136,7 @@ with open(target_path, "w") as f:
     json.dump(cfg, f, indent=2)
     f.write("\n")
 PY
-  log "OpenCode config → $target (model: ollama/${model_for_config})"
+  log "OpenCode config → $target (model: mlx/${model_for_config})"
 }
 
 install_shell_env() {
@@ -203,61 +156,21 @@ EOF
   export OPENCODE_ENABLE_EXA=1
 }
 
-# ---------------------------------------------------------------------------
-# Models
-# ---------------------------------------------------------------------------
-
-pull_models() {
-  # PULL_FAST=1 kept for backwards compat
-  [[ "$PULL_FAST" == "1" ]] && SKIP_FAST=0
-
-  log "Pulling $PRIMARY_MODEL (may take ~20–30 min)..."
-  ollama pull "$PRIMARY_MODEL"
-  if [[ "$SKIP_FAST" != "1" ]]; then
-    log "Pulling fast model from $FAST_MODEL_SOURCE (~9 GB)..."
-    ollama pull "$FAST_MODEL_SOURCE"
-    if [[ "$FAST_MODEL" != "$FAST_MODEL_SOURCE" ]]; then
-      log "Creating local alias $FAST_MODEL → $FAST_MODEL_SOURCE"
-      ollama cp "$FAST_MODEL_SOURCE" "$FAST_MODEL"
-    fi
-  fi
-}
-
-create_64k_variant() {
-  log "Creating $CONTEXT_MODEL (64k Modelfile)..."
-  cat > /tmp/Modelfile.local-agent <<EOF
-FROM $PRIMARY_MODEL
-PARAMETER num_ctx 65536
-EOF
-  ollama create "$CONTEXT_MODEL" -f /tmp/Modelfile.local-agent
-}
-
 update_models_env() {
   local env_file="$REPO_ROOT/config/models.env"
-  local tmp digest_primary digest_fast digest_fast_src
-  tmp="$(mktemp)"
-  model_digest() {
-    ollama list 2>/dev/null | awk -v m="$1" '$1 == m { print $2; exit }'
-  }
-  digest_primary="$(model_digest "$PRIMARY_MODEL")"
-  digest_fast="$(model_digest "$FAST_MODEL")"
-  digest_fast_src="$(model_digest "$FAST_MODEL_SOURCE")"
-  if [[ -f "$env_file" ]]; then
-    grep -vE '^(OLLAMA_VERSION|OPENCODE_VERSION|LLAMA_CPP_VERSION|UPGRADED_AT|PRIMARY_DIGEST|FAST_DIGEST|FAST_SOURCE_DIGEST)=' "$env_file" > "$tmp" || true
-  else
-    cp "$REPO_ROOT/config/models.env.example" "$tmp" 2>/dev/null || : > "$tmp"
-  fi
+  cp "$REPO_ROOT/config/models.env.example" "$env_file"
   {
-    cat "$tmp"
-    echo "PRIMARY_DIGEST=${digest_primary:-unknown}"
-    echo "FAST_DIGEST=${digest_fast:-unknown}"
-    echo "FAST_SOURCE_DIGEST=${digest_fast_src:-unknown}"
-    echo "OLLAMA_VERSION=$(ollama --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo unknown)"
+    cat "$env_file"
+    echo "PRIMARY_DIGEST=$("$PYTHON" -c "
+from huggingface_hub import HfApi
+info = HfApi().model_info('${PRIMARY_MODEL}')
+print(info.sha or 'unknown')
+" 2>/dev/null || echo unknown)"
+    echo "MLX_LM_VERSION=$("$PYTHON" -c "import mlx_lm; print(mlx_lm.__version__)" 2>/dev/null || echo unknown)"
     echo "OPENCODE_VERSION=$(opencode --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo unknown)"
-    echo "LLAMA_CPP_VERSION=$(brew list --versions llama.cpp 2>/dev/null | awk '{print $2}' || echo unknown)"
     echo "UPGRADED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  } > "$env_file"
-  rm -f "$tmp"
+  } > "${env_file}.tmp"
+  mv "${env_file}.tmp" "$env_file"
 }
 
 # ---------------------------------------------------------------------------
@@ -268,86 +181,41 @@ verify_setup() {
   local fail=0
   ok()   { echo "OK   $*"; }
   fail() { echo "FAIL $*" >&2; fail=1; }
-  warn() { echo "WARN $*" >&2; }
+  warn_v() { echo "WARN $*" >&2; }
 
-  if curl -sf --max-time 5 http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
-    ok "Ollama API responding on :11434"
+  if [[ -x "$PYTHON" ]]; then
+    ok "Python venv at .venv"
   else
-    fail "Ollama API not responding"
+    fail "Python venv missing — run: ./scripts/install.sh"
   fi
 
-  if command -v ollama >/dev/null && command -v brew >/dev/null; then
-    local target
-    target="$(llama_server_target)"
-    if llama_server_resolves; then
-      ok "llama-server present at $target"
-    else
-      fail "llama-server missing at $target"
-      echo "      Fix: ./scripts/install.sh --repair" >&2
-    fi
-  fi
-
-  local plist="${HOME}/Library/LaunchAgents/homebrew.mxcl.ollama.plist"
-  if [[ -f "$plist" ]]; then
-    local ctx
-    ctx="$(/usr/libexec/PlistBuddy -c "Print :EnvironmentVariables:OLLAMA_CONTEXT_LENGTH" "$plist" 2>/dev/null || echo "")"
-    if [[ -n "$ctx" ]] && [[ "$ctx" -ge "$MIN_CONTEXT" ]] 2>/dev/null; then
-      ok "OLLAMA_CONTEXT_LENGTH=$ctx"
-    else
-      fail "OLLAMA_CONTEXT_LENGTH missing or < $MIN_CONTEXT (got: ${ctx:-unset})"
-      echo "      Fix: ./scripts/install.sh --repair" >&2
-    fi
-    local keep
-    keep="$(/usr/libexec/PlistBuddy -c "Print :EnvironmentVariables:OLLAMA_KEEP_ALIVE" "$plist" 2>/dev/null || echo "")"
-    if [[ "$keep" == "${OLLAMA_KEEP_ALIVE:--1}" ]]; then
-      ok "OLLAMA_KEEP_ALIVE=$keep"
-    else
-      fail "OLLAMA_KEEP_ALIVE missing or wrong (got: ${keep:-unset}, want: ${OLLAMA_KEEP_ALIVE:--1})"
-      echo "      Fix: ./scripts/install.sh --repair" >&2
-    fi
+  if curl -sf --max-time 5 "${MLX_API_BASE}/v1/models" >/dev/null 2>&1; then
+    ok "MLX API responding on ${MLX_API_BASE}/v1"
   else
-    fail "Ollama launchd plist not found"
+    fail "MLX API not responding on ${MLX_API_BASE}/v1"
+    echo "      Fix: ./scripts/mlx-serve.sh start" >&2
   fi
 
-  if ollama ps 2>/dev/null | tail -n +2 | grep -q .; then
-    local run_ctx
-    run_ctx="$(ollama ps 2>/dev/null | awk 'NR==2 {print $7}' | tr -dc '0-9')"
-    if [[ -n "$run_ctx" ]] && [[ "$run_ctx" -lt "$MIN_CONTEXT" ]]; then
-      fail "Loaded model CONTEXT=$run_ctx (need >= $MIN_CONTEXT)"
-    elif [[ -n "$run_ctx" ]]; then
-      ok "Loaded model CONTEXT=$run_ctx"
-    fi
-  fi
-
-  local models
-  models="$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' | tr '\n' ' ')"
-  if [[ -n "$models" ]]; then
-    ok "Models: $models"
-    if ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' | grep -qxF "$PRIMARY_MODEL"; then
-      ok "Primary model: $PRIMARY_MODEL"
-    else
-      fail "Primary model missing: $PRIMARY_MODEL"
-    fi
-    if [[ "$SKIP_FAST" != "1" ]] && ! ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' | grep -qxF "$FAST_MODEL"; then
-      fail "Fast model missing: $FAST_MODEL (run: ollama pull $FAST_MODEL)"
-    elif ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' | grep -qxF "$FAST_MODEL"; then
-      ok "Fast model: $FAST_MODEL"
-    fi
+  if launchctl print "gui/$(id -u)/ai.local.mlx-server" >/dev/null 2>&1; then
+    ok "LaunchAgent ai.local.mlx-server loaded"
   else
-    fail "No models installed"
+    fail "LaunchAgent ai.local.mlx-server not loaded"
+    echo "      Fix: ./scripts/install.sh --repair" >&2
   fi
 
-  if curl -sf --max-time 5 http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
-    local probe
-    probe="$(curl -s --max-time 10 http://127.0.0.1:11434/api/generate \
-      -d "{\"model\":\"${PRIMARY_MODEL}\",\"prompt\":\"x\",\"stream\":false}" 2>&1 || true)"
-    if echo "$probe" | grep -q 'llama-server binary not found'; then
-      fail "Ollama runtime: llama-server not found"
-      echo "      Fix: ./scripts/install.sh --repair" >&2
-    elif echo "$probe" | grep -q '"response"'; then
-      ok "Ollama inference probe (model loaded)"
-    else
-      ok "Ollama inference probe OK (first load ~2 min)"
+  if curl -sf --max-time 5 "${MLX_API_BASE}/v1/models" >/dev/null 2>&1; then
+    local model_id
+    model_id="$(curl -sf "${MLX_API_BASE}/v1/models" | python3 -c "
+import json, sys
+target = sys.argv[1]
+d = json.load(sys.stdin)
+ids = [m.get('id','') for m in d.get('data',[])]
+print('ok:' + target if target in ids else 'missing')
+" "$PRIMARY_MODEL" 2>/dev/null || true)"
+    if [[ "$model_id" == "ok:${PRIMARY_MODEL}" ]]; then
+      ok "Model available: $PRIMARY_MODEL"
+    elif [[ -n "$model_id" ]]; then
+      fail "Primary model not in server list: $PRIMARY_MODEL"
     fi
   fi
 
@@ -372,10 +240,10 @@ except Exception as e:
     sys.exit(0)
 if c.get("default_agent") != "build":
     errors.append("default_agent")
-ollama = c.get("provider", {}).get("ollama", {})
-if ollama.get("options", {}).get("timeout", 0) < 600000:
+mlx = c.get("provider", {}).get("mlx", {})
+if mlx.get("options", {}).get("timeout", 0) < 600000:
     errors.append("timeout")
-models = ollama.get("models", {})
+models = mlx.get("models", {})
 if not any(m.get("tool_call") for m in models.values() if isinstance(m, dict)):
     errors.append("tool_call")
 perms = c.get("permission", {})
@@ -399,19 +267,24 @@ PY
   if [[ "${OPENCODE_ENABLE_EXA:-}" == "1" ]] || grep -qF "OPENCODE_ENABLE_EXA=1" "${HOME}/.zshrc" 2>/dev/null; then
     ok "OPENCODE_ENABLE_EXA configured (web search)"
   else
-    warn "OPENCODE_ENABLE_EXA not set — run: ./scripts/install.sh --repair"
+    warn_v "OPENCODE_ENABLE_EXA not set — run: ./scripts/install.sh --repair"
   fi
 
   if [[ "$VERIFY_INFERENCE" == "1" ]] && [[ "$fail" -eq 0 ]]; then
-    log "Full inference test (~2 min)..."
+    log "Full inference test (~30–90s on first load)..."
     local out
-    out="$(curl -sf --max-time 180 http://127.0.0.1:11434/api/generate \
-      -d "{\"model\":\"${PRIMARY_MODEL}\",\"prompt\":\"Reply with exactly: setup ok\",\"stream\":false}" \
-      | grep -o 'setup ok' || true)"
-    if [[ "$out" == "setup ok" ]]; then
-      ok "Full inference returned 'setup ok'"
+    out="$(curl -sf --max-time 300 "${MLX_API_BASE}/v1/chat/completions" \
+      -H 'Content-Type: application/json' \
+      -d "{\"model\":\"${PRIMARY_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: setup ok\"}],\"max_tokens\":64}" \
+      2>/dev/null | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print((d.get('choices') or [{}])[0].get('message', {}).get('content', ''))
+" 2>/dev/null || true)"
+    if echo "$out" | grep -qi 'setup ok'; then
+      ok "Full inference returned content with 'setup ok'"
     else
-      fail "Full inference timeout"
+      fail "Full inference failed or empty (got: ${out:-empty})"
     fi
   fi
 
@@ -426,7 +299,7 @@ PY
 }
 
 # ---------------------------------------------------------------------------
-# Install OpenCode CLI
+# OpenCode CLI
 # ---------------------------------------------------------------------------
 
 install_opencode_cli() {
@@ -446,70 +319,92 @@ install_opencode_cli() {
 }
 
 # ---------------------------------------------------------------------------
+# Cleanup unused HF models
+# ---------------------------------------------------------------------------
+
+cmd_cleanup() {
+  ensure_venv
+  local before after
+  before="$(du -sh "${HOME}/.cache/huggingface/hub" 2>/dev/null | awk '{print $1}' || echo unknown)"
+  log "HF cache before cleanup: ${before}"
+  "$PYTHON" - "$PRIMARY_MODEL" <<'PY'
+import os, sys, shutil
+from huggingface_hub import scan_cache_dir
+
+keep = sys.argv[1].replace("/", "--")
+cache = scan_cache_dir()
+for repo in cache.repos:
+    slug = repo.repo_id.replace("/", "--")
+    if slug.endswith(keep.split("--", 1)[-1]) or keep in slug:
+        continue
+    print("Removing cached model:", repo.repo_id)
+    for rev in repo.revisions:
+        strategy = cache.delete_revisions(rev.commit_hash)
+        strategy.execute()
+PY
+  after="$(du -sh "${HOME}/.cache/huggingface/hub" 2>/dev/null | awk '{print $1}' || echo unknown)"
+  echo ""
+  echo "=============================================="
+  echo " Cleanup complete"
+  echo "  HF cache: ${before} → ${after}"
+  echo "  Keep:     ${PRIMARY_MODEL}"
+  echo "=============================================="
+}
+
+# ---------------------------------------------------------------------------
 # Modes
 # ---------------------------------------------------------------------------
 
 cmd_repair() {
   command -v brew >/dev/null || die "Homebrew required"
-  command -v ollama >/dev/null || die "Ollama not installed — run: ./scripts/install.sh"
-  brew services start ollama 2>/dev/null || true
-  ensure_ollama_post_install
-  export MODEL_FOR_CONFIG="${MODEL_FOR_CONFIG:-$PRIMARY_MODEL}"
+  ensure_venv
+  chmod +x "$SERVE"
+  PRIMARY_MODEL="$PRIMARY_MODEL" MLX_PORT="$MLX_PORT" "$SERVE" restart || "$SERVE" start
+  export MODEL_FOR_CONFIG="$OPENCODE_MODEL_ID"
   configure_opencode
   install_shell_env
+  update_models_env
   verify_setup
 }
 
 cmd_install() {
   command -v brew >/dev/null || die "Homebrew required — https://brew.sh"
 
-  if ! command -v node >/dev/null 2>&1; then
-    log "Installing Node.js..."
-    brew install node
+  if ! command -v python3 >/dev/null 2>&1; then
+    log "Installing Python..."
+    brew install python
   fi
 
-  if ! command -v ollama >/dev/null 2>&1; then
-    log "Installing Ollama..."
-    brew install ollama
-  fi
-
-  brew services start ollama
-  wait_for_ollama
-  ensure_ollama_post_install
-
-  pull_models
-
-  local model_for_config="$PRIMARY_MODEL"
-  if [[ "$CREATE_64K" == "1" ]]; then
-    create_64k_variant
-    model_for_config="$CONTEXT_MODEL"
-  fi
+  ensure_venv
+  download_model "$PRIMARY_MODEL"
 
   install_opencode_cli
-  export MODEL_FOR_CONFIG="$model_for_config"
+  chmod +x "$SERVE" "$REPO_ROOT/scripts/loop.sh" "$REPO_ROOT/scripts/benchmark.sh" 2>/dev/null || true
+
+  PRIMARY_MODEL="$PRIMARY_MODEL" MLX_PORT="$MLX_PORT" "$SERVE" start
+
+  export MODEL_FOR_CONFIG="$OPENCODE_MODEL_ID"
   configure_opencode
   install_shell_env
 
   [[ -f "$REPO_ROOT/config/models.env" ]] || cp "$REPO_ROOT/config/models.env.example" "$REPO_ROOT/config/models.env"
-  chmod +x "$REPO_ROOT/scripts/loop.sh" 2>/dev/null || true
   update_models_env
 
   log "Verifying..."
-  verify_setup || warn "Verification failed — run: ./scripts/install.sh --repair"
+  verify_setup || warn "Verification failed — model may still be loading; run: ./scripts/install.sh --verify"
 
   echo ""
   echo "=============================================="
-  echo " Setup complete"
+  echo " Setup complete (MLX + OpenCode)"
   echo "=============================================="
-  echo "  Ollama:    $(ollama --version 2>/dev/null | head -1)"
-  echo "  Models:    $(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' | tr '\n' ' ')"
+  echo "  MLX API:   ${MLX_API_BASE}/v1"
+  echo "  Model:     ${PRIMARY_MODEL}"
   echo "  OpenCode:  $(command -v opencode || echo 'not found')"
   echo ""
   echo "  source ~/.zshrc          # load OPENCODE_ENABLE_EXA"
   echo "  ./scripts/install.sh --verify"
-  echo "  ./scripts/install.sh --upgrade"
+  echo "  ./scripts/mlx-serve.sh status"
   echo "  opencode                 # start terminal agent"
-  echo "  Optional Zoo Code: docs/setup-zoocode.md"
   echo "=============================================="
 }
 
@@ -521,122 +416,45 @@ cmd_check_upgrades() {
   echo "=== Upgrade check (no changes) ==="
   echo ""
   echo "--- Tools ---"
-  echo "  Ollama:       $(version_line ollama --version)"
-  echo "  OpenCode:     $(version_line opencode --version)"
-  echo "  llama-server: $(version_line llama-server --version)"
+  echo "  mlx-lm:    $( [[ -x "$PYTHON" ]] && "$PYTHON" -c "import mlx_lm; print(mlx_lm.__version__)" 2>/dev/null || echo not installed)"
+  echo "  OpenCode:  $(version_line opencode --version)"
   echo ""
-  for pkg in ollama llama.cpp; do
-    if brew list "$pkg" >/dev/null 2>&1; then
-      if brew outdated "$pkg" 2>/dev/null | grep -q .; then
-        echo "  outdated: $pkg"
-      else
-        echo "  up to date: $pkg"
-      fi
-    else
-      echo "  not installed: $pkg"
-    fi
-  done
-  if brew list anomalyco/tap/opencode >/dev/null 2>&1; then
-    if brew outdated anomalyco/tap/opencode 2>/dev/null | grep -q .; then
-      echo "  outdated: opencode"
-    else
-      echo "  up to date: opencode"
-    fi
+  if [[ -x "$PIP" ]]; then
+    echo "--- Python packages (outdated) ---"
+    "$PIP" list --outdated 2>/dev/null | tail -n +3 | head -10 || echo "  (none or venv missing)"
   fi
   echo ""
-  echo "--- Qwen models (local) ---"
-  if command -v ollama >/dev/null; then
-    ollama list 2>/dev/null | tail -n +2 | while read -r name id size _rest; do
-      printf "  %-28s %s  %s\n" "$name" "$id" "$size"
-    done
-    echo ""
-    echo "  Pinned in config/models.env:"
-    echo "    PRIMARY:      ${PRIMARY_MODEL}"
-    echo "    FAST:         ${FAST_MODEL} ← ${FAST_MODEL_SOURCE}"
-    if [[ -f "$env_file" ]]; then
-      grep -E '^(PRIMARY_DIGEST|FAST_DIGEST|UPGRADED_AT)=' "$env_file" 2>/dev/null | sed 's/^/    /' || true
-    fi
-    echo ""
-    echo "  Monitor new releases:"
-    echo "    https://ollama.com/library/qwen3-coder/tags"
-    echo "    https://ollama.com/freehuntx/qwen3-coder/tags"
-  else
-    echo "  Ollama not installed"
+  echo "--- Model ---"
+  echo "  PRIMARY: ${PRIMARY_MODEL}"
+  if [[ -f "$env_file" ]]; then
+    grep -E '^(PRIMARY_DIGEST|UPGRADED_AT)=' "$env_file" 2>/dev/null | sed 's/^/  /' || true
   fi
+  echo ""
+  echo "  HF repo: https://huggingface.co/${PRIMARY_MODEL}"
   echo ""
   echo "Commands:"
-  echo "  ./scripts/install.sh --upgrade-models   # re-pull Qwen models only (~fast if current)"
-  echo "  ./scripts/install.sh --upgrade            # tools + models + config"
-  echo "  See docs/UPGRADING.md"
+  echo "  ./scripts/install.sh --upgrade"
+  echo "  ./scripts/install.sh --upgrade-models"
+  echo "  See docs/UPGRADING.md · docs/MODELS.md"
 }
 
 cmd_upgrade_models() {
-  command -v ollama >/dev/null || die "Ollama not installed"
-  local before_p before_f before_fs
-  before_p="$(ollama list 2>/dev/null | awk -v m="$PRIMARY_MODEL" '$1==m {print $2}')"
-  before_f="$(ollama list 2>/dev/null | awk -v m="$FAST_MODEL" '$1==m {print $2}')"
-  before_fs="$(ollama list 2>/dev/null | awk -v m="$FAST_MODEL_SOURCE" '$1==m {print $2}')"
-
-  brew services start ollama 2>/dev/null || true
-  wait_for_ollama
-
-  log "Re-pulling $PRIMARY_MODEL..."
-  ollama pull "$PRIMARY_MODEL"
-  if [[ "$SKIP_FAST" != "1" ]]; then
-    log "Re-pulling $FAST_MODEL_SOURCE..."
-    ollama pull "$FAST_MODEL_SOURCE"
-    if [[ "$FAST_MODEL" != "$FAST_MODEL_SOURCE" ]]; then
-      log "Refreshing alias $FAST_MODEL → $FAST_MODEL_SOURCE"
-      ollama cp "$FAST_MODEL_SOURCE" "$FAST_MODEL"
-    fi
-  fi
-
-  local after_p after_f after_fs
-  after_p="$(ollama list 2>/dev/null | awk -v m="$PRIMARY_MODEL" '$1==m {print $2}')"
-  after_f="$(ollama list 2>/dev/null | awk -v m="$FAST_MODEL" '$1==m {print $2}')"
-  after_fs="$(ollama list 2>/dev/null | awk -v m="$FAST_MODEL_SOURCE" '$1==m {print $2}')"
-
+  ensure_venv
+  download_model "$PRIMARY_MODEL"
+  PRIMARY_MODEL="$PRIMARY_MODEL" "$SERVE" restart
   update_models_env
-  verify_setup || warn "Verification failed — run: ./scripts/install.sh --repair"
-
-  echo ""
-  echo "=============================================="
-  echo " Model upgrade complete"
-  if [[ "$before_p" != "$after_p" ]]; then
-    echo "  $PRIMARY_MODEL: $before_p → $after_p (updated)"
-  else
-    echo "  $PRIMARY_MODEL: unchanged ($after_p)"
-  fi
-  if [[ "$SKIP_FAST" != "1" ]]; then
-    if [[ "$before_fs" != "$after_fs" ]]; then
-      echo "  $FAST_MODEL_SOURCE: $before_fs → $after_fs (updated)"
-    else
-      echo "  $FAST_MODEL_SOURCE: unchanged ($after_fs)"
-    fi
-    if [[ "$before_f" != "$after_f" ]]; then
-      echo "  $FAST_MODEL (alias): $before_f → $after_f"
-    fi
-  fi
-  echo "  Pinned in config/models.env (UPGRADED_AT, digests)"
-  echo "=============================================="
+  verify_setup || warn "Verification failed"
+  echo "Model upgrade complete: ${PRIMARY_MODEL}"
 }
 
 cmd_upgrade() {
   command -v brew >/dev/null || die "Homebrew required"
 
-  local before_o before_c before_l
-  before_o="$(version_line ollama --version)"
+  local before_c before_m
   before_c="$(version_line opencode --version)"
-  before_l="$(version_line llama-server --version)"
+  before_m="$( [[ -x "$PYTHON" ]] && "$PYTHON" -c "import mlx_lm; print(mlx_lm.__version__)" 2>/dev/null || echo n/a)"
 
   if [[ "$SKIP_BREW" != "1" ]]; then
-    brew update
-    for pkg in ollama llama.cpp; do
-      if brew list "$pkg" >/dev/null 2>&1 && brew outdated "$pkg" 2>/dev/null | grep -q .; then
-        log "Upgrading $pkg..."
-        brew upgrade "$pkg"
-      fi
-    done
     brew tap anomalyco/tap 2>/dev/null || true
     if brew list anomalyco/tap/opencode >/dev/null 2>&1 && brew outdated anomalyco/tap/opencode 2>/dev/null | grep -q .; then
       log "Upgrading opencode..."
@@ -647,23 +465,11 @@ cmd_upgrade() {
     fi
   fi
 
-  brew services start ollama 2>/dev/null || true
-  wait_for_ollama
-  ensure_ollama_post_install
+  ensure_venv
+  [[ "$SKIP_MODELS" != "1" ]] && download_model "$PRIMARY_MODEL"
+  PRIMARY_MODEL="$PRIMARY_MODEL" "$SERVE" restart
 
-  if [[ "$SKIP_MODELS" != "1" ]]; then
-    ollama pull "$PRIMARY_MODEL"
-    if [[ "$SKIP_FAST" != "1" ]]; then
-      ollama pull "$FAST_MODEL_SOURCE"
-      [[ "$FAST_MODEL" != "$FAST_MODEL_SOURCE" ]] && ollama cp "$FAST_MODEL_SOURCE" "$FAST_MODEL"
-    fi
-    [[ "$CREATE_64K" == "1" ]] && create_64k_variant
-  fi
-
-  local model_for_config="$PRIMARY_MODEL"
-  [[ "$CREATE_64K" == "1" ]] && ollama list 2>/dev/null | grep -q "$CONTEXT_MODEL" && model_for_config="$CONTEXT_MODEL"
-
-  export MODEL_FOR_CONFIG="$model_for_config"
+  export MODEL_FOR_CONFIG="$OPENCODE_MODEL_ID"
   configure_opencode
   install_shell_env
   update_models_env
@@ -672,25 +478,28 @@ cmd_upgrade() {
   echo ""
   echo "=============================================="
   echo " Upgrade complete"
-  echo "  Ollama:       $before_o → $(version_line ollama --version)"
-  echo "  OpenCode:     $before_c → $(version_line opencode --version)"
-  echo "  llama-server: $before_l → $(version_line llama-server --version)"
+  echo "  mlx-lm:    $before_m → $( [[ -x "$PYTHON" ]] && "$PYTHON" -c "import mlx_lm; print(mlx_lm.__version__)" 2>/dev/null || echo n/a)"
+  echo "  OpenCode:  $before_c → $(version_line opencode --version)"
   echo "=============================================="
 }
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+cmd_benchmark() {
+  local bench="$REPO_ROOT/scripts/benchmark.sh"
+  [[ -x "$bench" ]] || chmod +x "$bench"
+  "$bench" "$@"
+}
 
 case "${1:-}" in
-  --verify)  verify_setup ;;
-  --repair)  cmd_repair ;;
+  --verify)         verify_setup ;;
+  --repair)         cmd_repair ;;
   --upgrade)        cmd_upgrade ;;
   --upgrade-models) cmd_upgrade_models ;;
   --check)          cmd_check_upgrades ;;
+  --cleanup)        cmd_cleanup ;;
+  --benchmark)      shift; cmd_benchmark "$@" ;;
   -h|--help)
     sed -n '2,18p' "$0"
     ;;
-  "")        cmd_install ;;
-  *)         die "Unknown option: $1 (try --help)" ;;
+  "")               cmd_install ;;
+  *)                die "Unknown option: $1 (try --help)" ;;
 esac

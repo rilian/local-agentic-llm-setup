@@ -20,7 +20,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      echo "Usage: $0 [--max N] [--model ollama/qwen3-coder:30b] \"task description\""
+      echo "Usage: $0 [--max N] [--model mlx/mlx-community/Qwen3.5-9B-OptiQ-4bit] \"task description\""
       exit 0
       ;;
     *)
