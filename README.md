@@ -1,6 +1,6 @@
 # Local Agentic LLM (Mac M4 Pro)
 
-Terminal-first **local coding agent** on Apple Silicon: **OpenCode** + native **MLX** (`mlx-lm` server) + `./scripts/loop.sh`. Use **ChatGPT** for general GUI chat.
+Terminal-first **local coding agent** on Apple Silicon: **OpenCode** + native **MLX** (`mlx-lm` server) + `./scripts/loop.sh`.
 
 - **Privacy-first** — models run locally via `http://127.0.0.1:8080/v1`
 - **Approval-only** — never use `--dangerously-skip-permissions`
@@ -21,7 +21,7 @@ Terminal
 mlx-lm server :8080/v1  ←  Qwen3.5 9B OptiQ (Apple MLX, launchd)
 ```
 
-Run OpenCode in your project directory (e.g. VS Code integrated terminal: `cd myproject && opencode`).
+Run OpenCode from your project directory: `cd myproject && opencode`.
 
 ---
 
