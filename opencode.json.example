@@ -25,7 +25,7 @@
     "foundry": {
       "type": "remote",
       "enabled": false,
-      "url": "https://proxet.palantirfoundry.com/mcp/third-party-application/ri.third-party-applications.main.application.YOUR_APP_ID",
+      "url": "FOUNDRY_MCP_URL",
       "headers": {
         "Authorization": "Bearer {env:FOUNDRY_MCP_TOKEN}",
         "Accept": "application/json, text/event-stream"

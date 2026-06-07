@@ -115,7 +115,8 @@ Every `./scripts/install.sh --upgrade` runs a **model check** against HuggingFac
 
 - **Current model** — Hub revision date and whether your pinned digest is stale (same model id, newer weights)
 - **Recommended** — best catalog entry that fits the 12 GB RAM budget (9B OptiQ is the default pick today)
-- **New on Hub** — OptiQ models not yet in the catalog (hint to update the repo when mlx-community ships new sizes)
+- **Watch** — polls Hub for models in `watch` inside `config/recommended-models.json` (currently `Qwen/Qwen3.6-9B` and `mlx-community/Qwen3.6-9B-OptiQ-4bit`); flags the moment either lands and auto-recommends the OptiQ build when available
+- **New on Hub** — Qwen3.5/3.6 OptiQ models not yet in the catalog (hint to update rankings when mlx-community ships new sizes)
 
 If output says a better model is available:
 

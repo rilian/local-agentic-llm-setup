@@ -11,6 +11,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/scripts/colors.sh"
 VENV="${REPO_ROOT}/.venv"
 PYTHON="${VENV}/bin/python"
 PIP="${VENV}/bin/pip"
@@ -37,9 +39,7 @@ if [[ "$MLX_CHAT_TEMPLATE_ARGS" != *'"'* ]]; then
   MLX_CHAT_TEMPLATE_ARGS='{"enable_thinking":false}'
 fi
 
-log()  { echo "==> $*"; }
-warn() { echo "WARNING: $*" >&2; }
-die()  { echo "ERROR: $*" >&2; exit 1; }
+# log, warn, die, ok, fail, section, banner — scripts/colors.sh
 
 # ---------------------------------------------------------------------------
 # MLX helpers
@@ -165,28 +165,26 @@ print(info.sha or 'unknown')
 
 verify_setup() {
   local fail=0
-  ok()   { echo "OK   $*"; }
-  fail() { echo "FAIL $*" >&2; fail=1; }
-  warn_v() { echo "WARN $*" >&2; }
+  check_fail() { fail "$@"; fail=1; }
 
   if [[ -x "$PYTHON" ]]; then
     ok "Python venv at .venv"
   else
-    fail "Python venv missing — run: ./scripts/install.sh"
+    check_fail "Python venv missing — run: ./scripts/install.sh"
   fi
 
   if curl -sf --max-time 5 "${MLX_API_BASE}/v1/models" >/dev/null 2>&1; then
     ok "MLX API responding on ${MLX_API_BASE}/v1"
   else
-    fail "MLX API not responding on ${MLX_API_BASE}/v1"
-    echo "      Fix: ./scripts/mlx-serve.sh start" >&2
+    check_fail "MLX API not responding on ${MLX_API_BASE}/v1"
+    fix_hint "./scripts/mlx-serve.sh start"
   fi
 
   if launchctl print "gui/$(id -u)/ai.local.mlx-server" >/dev/null 2>&1; then
     ok "LaunchAgent ai.local.mlx-server loaded"
   else
-    fail "LaunchAgent ai.local.mlx-server not loaded"
-    echo "      Fix: ./scripts/install.sh --upgrade" >&2
+    check_fail "LaunchAgent ai.local.mlx-server not loaded"
+    fix_hint "./scripts/install.sh --upgrade"
   fi
 
   if curl -sf --max-time 5 "${MLX_API_BASE}/v1/models" >/dev/null 2>&1; then
@@ -201,14 +199,14 @@ print('ok:' + target if target in ids else 'missing')
     if [[ "$model_id" == "ok:${PRIMARY_MODEL}" ]]; then
       ok "Model available: $PRIMARY_MODEL"
     elif [[ -n "$model_id" ]]; then
-      fail "Primary model not in server list: $PRIMARY_MODEL"
+      check_fail "Primary model not in server list: $PRIMARY_MODEL"
     fi
   fi
 
   if command -v opencode >/dev/null 2>&1; then
     ok "OpenCode $(opencode --version 2>/dev/null | head -1)"
   else
-    fail "OpenCode not installed"
+    check_fail "OpenCode not installed"
   fi
 
   local oc="${HOME}/.config/opencode/opencode.json"
@@ -242,25 +240,25 @@ PY
     if [[ "$oc_check" == "ok" ]]; then
       ok "OpenCode config: tool_call, permissions, build agent"
     else
-      fail "OpenCode config not agent-ready ($oc_check)"
-      echo "      Fix: ./scripts/install.sh --upgrade" >&2
+      check_fail "OpenCode config not agent-ready ($oc_check)"
+      fix_hint "./scripts/install.sh --upgrade"
     fi
   else
-    fail "OpenCode config missing"
-    echo "      Fix: ./scripts/install.sh --upgrade" >&2
+    check_fail "OpenCode config missing"
+    fix_hint "./scripts/install.sh --upgrade"
   fi
 
   if [[ "${OPENCODE_ENABLE_EXA:-}" == "1" ]] || grep -qF "OPENCODE_ENABLE_EXA=1" "${HOME}/.zshrc" 2>/dev/null; then
     ok "OPENCODE_ENABLE_EXA configured (web search)"
   else
-    warn_v "OPENCODE_ENABLE_EXA not set — run: ./scripts/install.sh --upgrade"
+    warn_note "OPENCODE_ENABLE_EXA not set — run: ./scripts/install.sh --upgrade"
   fi
 
   if [[ "$fail" -eq 0 ]]; then
     log "Agent tool test (~15–60s): read README.md via tool call..."
     local agent_result
     agent_result="$(python3 - "$REPO_ROOT" "$PRIMARY_MODEL" "$MLX_API_BASE" <<'PY' || true
-import json, sys, urllib.error, urllib.request
+import json, os, sys, urllib.error, urllib.request
 from pathlib import Path
 
 repo = Path(sys.argv[1])
@@ -268,8 +266,11 @@ model = sys.argv[2]
 api_base = sys.argv[3].rstrip("/")
 goal_path = repo / "README.md"
 
-def step(*parts):
-    print("      " + " ".join(str(p) for p in parts), file=sys.stderr)
+def step(msg, tone="dim"):
+    reset = os.environ.get("LLM_C_RESET", "")
+    key = {"dim": "LLM_C_DIM", "watch": "LLM_C_YELLOW", "info": "LLM_C_CYAN"}.get(tone, "LLM_C_DIM")
+    pre = os.environ.get(key, "")
+    print(f"{pre}      {msg}{reset}", file=sys.stderr)
 
 if not goal_path.is_file():
     print("missing:README.md")
@@ -277,7 +278,7 @@ if not goal_path.is_file():
 
 goal_text = goal_path.read_text(encoding="utf-8")
 expected_line = goal_text.splitlines()[0].strip()
-step("expected heading:", expected_line)
+step(f"expected heading: {expected_line}")
 
 tools = [{
     "type": "function",
@@ -330,9 +331,9 @@ msg = choice1.get("message") or {}
 finish1 = choice1.get("finish_reason", "")
 tool_calls = msg.get("tool_calls") or []
 if not tool_calls:
-    step("turn 1 finish:", finish1)
+    step(f"turn 1 finish: {finish1}")
     if msg.get("content"):
-        step("turn 1 content:", msg.get("content"))
+        step(f"turn 1 content: {msg.get('content')}")
     print("no_tool_call:model replied without using read tool")
     sys.exit(0)
 
@@ -353,8 +354,8 @@ if "README.md" not in path:
     print(f"wrong_path:{path}")
     sys.exit(0)
 
-step("turn 1 tool:", fn.get("name"), json.dumps(args))
-step("turn 1 finish:", finish1)
+step(f"turn 1 tool: {fn.get('name')} {json.dumps(args)}", "info")
+step(f"turn 1 finish: {finish1}")
 
 messages.append(msg)
 messages.append({
@@ -371,8 +372,8 @@ except Exception as e:
 
 choice2 = (r2.get("choices") or [{}])[0]
 content = (choice2.get("message") or {}).get("content") or ""
-step("turn 2 finish:", choice2.get("finish_reason", ""))
-step("turn 2 reply:", content)
+step(f"turn 2 finish: {choice2.get('finish_reason', '')}")
+step(f"turn 2 reply: {content}")
 
 if expected_line not in content and "Local Agentic LLM" not in content:
     print(f"bad_response:{content[:160]!r}")
@@ -384,16 +385,16 @@ PY
     if [[ "$agent_result" == "ok" ]]; then
       ok "Agent tool test: read README.md via tool, quoted heading"
     else
-      fail "Agent tool test failed (${agent_result:-unknown})"
+      check_fail "Agent tool test failed (${agent_result:-unknown})"
     fi
   fi
 
   echo ""
   if [[ "$fail" -eq 0 ]]; then
-    echo "All checks passed."
+    success_msg "All checks passed."
     return 0
   fi
-  echo "Some checks failed — try: ./scripts/install.sh --upgrade" >&2
+  error_msg "Some checks failed — try: ./scripts/install.sh --upgrade"
   return 1
 }
 
@@ -446,7 +447,9 @@ if removed:
 PY
 )"
   if [[ -n "$removed" ]]; then
-    echo "$removed" | sed 's/^/      removed: /'
+    while IFS= read -r line; do
+      dim_line "      removed: $line"
+    done <<< "$removed"
     log "HF cache cleanup done"
   else
     log "HF cache: nothing to remove"
@@ -493,17 +496,15 @@ cmd_install() {
   verify_setup || warn "Verification failed — model may still be loading; run: ./scripts/install.sh --upgrade"
 
   echo ""
-  echo "=============================================="
-  echo " Setup complete (MLX + OpenCode)"
-  echo "=============================================="
-  echo "  MLX API:   ${MLX_API_BASE}/v1"
-  echo "  Model:     ${PRIMARY_MODEL}"
-  echo "  OpenCode:  $(command -v opencode || echo 'not found')"
+  banner "Setup complete (MLX + OpenCode)"
+  label_value "MLX API" "${MLX_API_BASE}/v1"
+  label_value "Model" "${PRIMARY_MODEL}"
+  label_value "OpenCode" "$(command -v opencode || echo 'not found')"
   echo ""
-  echo "  source ~/.zshrc          # load OPENCODE_ENABLE_EXA"
-  echo "  ./scripts/mlx-serve.sh status"
-  echo "  opencode                 # start terminal agent"
-  echo "=============================================="
+  dim_line "  source ~/.zshrc          # load OPENCODE_ENABLE_EXA"
+  dim_line "  ./scripts/mlx-serve.sh status"
+  dim_line "  opencode                 # start terminal agent"
+  printf '%b\n' "${C_CYAN}==============================================${C_RESET}"
 }
 
 version_line() { "$@" 2>&1 | head -1 | tr -d '\n' || echo "n/a"; }
@@ -547,22 +548,13 @@ short_digest() {
 
 print_tool_versions() {
   local heading="${1:-Installed versions}"
-  echo "--- ${heading} ---"
-  echo "  mlx:        $(mlx_version)"
-  echo "  mlx-lm:     $(mlx_lm_version)"
-  echo "  OpenCode:   $(opencode_version)"
-  echo "  Model:      ${PRIMARY_MODEL}"
-  echo "  HF digest:  $(short_digest "$(pinned_digest)")"
+  section "$heading"
+  label_value "mlx" "$(mlx_version)"
+  label_value "mlx-lm" "$(mlx_lm_version)"
+  label_value "OpenCode" "$(opencode_version)"
+  label_value "Model" "${PRIMARY_MODEL}"
+  label_value "HF digest" "$(short_digest "$(pinned_digest)")"
   echo ""
-}
-
-report_version_change() {
-  local name="$1" before="$2" after="$3"
-  if [[ "$before" == "$after" ]]; then
-    echo "  ${name}:  ${after}  (unchanged)"
-  else
-    echo "  ${name}:  ${before} → ${after}"
-  fi
 }
 
 upgrade_python_deps() {
@@ -616,7 +608,7 @@ check_recommended_model() {
   pinned="$(pinned_digest)"
   ensure_venv 2>/dev/null || true
   "$PYTHON" - "$catalog" "$PRIMARY_MODEL" "$pinned" "$switch_flag" <<'PY'
-import json, sys
+import json, os, sys
 from pathlib import Path
 
 catalog_path = Path(sys.argv[1])
@@ -627,8 +619,11 @@ auto_switch = sys.argv[4] == "1"
 def emit(key, val):
     print(f"{key}={val}")
 
-def step(msg):
-    print(f"      {msg}", file=sys.stderr)
+def step(msg, tone="dim"):
+    reset = os.environ.get("LLM_C_RESET", "")
+    key = {"dim": "LLM_C_DIM", "watch": "LLM_C_YELLOW", "info": "LLM_C_CYAN", "action": "LLM_C_MAGENTA"}.get(tone, "LLM_C_DIM")
+    pre = os.environ.get(key, "")
+    print(f"{pre}      {msg}{reset}", file=sys.stderr)
 
 try:
     from huggingface_hub import HfApi
@@ -653,10 +648,45 @@ known_ids = {m["id"] for m in models}
 fitting = [m for m in models if m.get("ram_gb", 99) <= budget and not m.get("experimental")]
 if not fitting:
     fitting = models
+
+api = HfApi()
+
+def hub_model_exists(model_id):
+    try:
+        api.model_info(model_id)
+        return True
+    except Exception as e:
+        err = str(e).lower()
+        if "404" in err or "not found" in err or "repositorynotfound" in err:
+            return False
+        step(f"  watch: could not query {model_id}: {e}")
+        return False
+
+watch = catalog.get("watch", [])
+watch_hits = []
+for entry in watch:
+    wid = entry.get("hub_id", "")
+    if not wid or wid in known_ids:
+        continue
+    if hub_model_exists(wid):
+        watch_hits.append(entry)
+        step(f"★ WATCH: {wid} is now on Hub", "watch")
+        step(f"  {entry.get('label', wid)}", "watch")
+        on_avail = entry.get("on_available")
+        if on_avail and on_avail.get("ram_gb", 99) <= budget:
+            fitting.append({
+                "id": wid,
+                "rank": on_avail.get("rank", 0),
+                "ram_gb": on_avail.get("ram_gb", 99),
+                "label": entry.get("label", wid),
+                "from_watch": True,
+            })
+        elif not on_avail:
+            step("    (base weights — wait for mlx-community OptiQ before switching PRIMARY_MODEL)")
+
 best = max(fitting, key=lambda m: m.get("rank", 0))
 recommended = best["id"]
 
-api = HfApi()
 revision_stale = False
 current_sha = ""
 current_modified = ""
@@ -670,8 +700,8 @@ try:
 except Exception as e:
     step(f"could not fetch Hub info for {current}: {e}")
 
-step(f"profile: {catalog.get('profile', 'unknown')} (RAM budget {budget} GB for agent)")
-step(f"current:  {current}")
+step(f"profile: {catalog.get('profile', 'unknown')} (RAM budget {budget} GB for agent)", "info")
+step(f"current:  {current}", "info")
 if current_modified:
     step(f"  Hub updated: {current_modified}")
 if current_sha:
@@ -680,22 +710,31 @@ if pinned and pinned not in ("unknown", ""):
     step(f"  pinned:       {pinned[:12]}" + ("  (stale — re-download on upgrade)" if revision_stale else ""))
 
 rec_label = best.get("label", recommended)
-step(f"recommended for this Mac: {recommended}")
+step(f"recommended for this Mac: {recommended}", "info")
 step(f"  {rec_label}")
 
 should_switch = recommended != current
 if should_switch:
-    step(f"  → newer/better option available (rank {best.get('rank', '?')} vs current)")
+    step(f"  → newer/better option available (rank {best.get('rank', '?')} vs current)", "action")
 else:
     if revision_stale:
         step("  same model id — Hub has a newer revision (will re-sync weights)")
     else:
         step("  already the best fit in config/recommended-models.json")
 
-# Hub models in Qwen3.5 OptiQ family not in our catalog
+if watch and not watch_hits:
+    step("  watch (not on Hub yet):")
+    for entry in watch:
+        wid = entry.get("hub_id", "")
+        if wid and wid not in known_ids:
+            step(f"    - {wid}")
+
+# Hub models in Qwen OptiQ families not in our catalog
 try:
-    hub = {m.id for m in api.list_models(author="mlx-community", search="Qwen3.5-OptiQ", limit=50)}
-    unknown = sorted(hub - known_ids)
+    hub = set()
+    for search in ("Qwen3.5-OptiQ", "Qwen3.6-OptiQ"):
+        hub.update(m.id for m in api.list_models(author="mlx-community", search=search, limit=50))
+    unknown = sorted(hub - known_ids - {e.get("hub_id") for e in watch})
     if unknown:
         step("  new on Hub (not in catalog — update recommended-models.json to rank):")
         for uid in unknown[:5]:
@@ -705,10 +744,17 @@ try:
 except Exception:
     pass
 
+if watch_hits:
+    optiq_ready = any(e.get("on_available") for e in watch_hits)
+    if optiq_ready and recommended != current:
+        step("  watched OptiQ model ready — run: ./scripts/install.sh --upgrade --best-model", "action")
+    elif optiq_ready and recommended == current:
+        step("  watched OptiQ model ready — add to catalog and re-run upgrade")
+
 if should_switch and auto_switch:
     step("  switching PRIMARY_MODEL (--best-model)")
 elif should_switch:
-    step("  to switch: ./scripts/install.sh --upgrade --best-model")
+    step("  to switch: ./scripts/install.sh --upgrade --best-model", "action")
 
 emit("recommended_id", recommended)
 emit("should_switch", "1" if should_switch else "0")
@@ -741,12 +787,10 @@ cmd_upgrade() {
   local before_d after_d
   before_d="$(pinned_digest)"
 
-  echo "=============================================="
-  echo " Upgrade"
-  echo "=============================================="
+  banner "Upgrade"
   print_tool_versions "Before"
 
-  echo "--- Upgrading ---"
+  section "Upgrading"
   upgrade_python_deps
   upgrade_opencode
   apply_model_recommendation
@@ -761,12 +805,11 @@ cmd_upgrade() {
   verify_setup || warn "Verification failed — run: ./scripts/install.sh --upgrade"
 
   echo ""
-  echo "--- After ---"
+  section "After"
   print_tool_versions "Installed versions"
   report_version_change "HF digest" "$(short_digest "$before_d")" "$(short_digest "$after_d")"
-  echo "=============================================="
-  echo "Upgrade complete."
-  echo "=============================================="
+  echo ""
+  banner "Upgrade complete"
 }
 
 case "${1:-}" in

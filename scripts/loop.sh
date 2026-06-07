@@ -5,6 +5,10 @@
 
 set -euo pipefail
 
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/scripts/colors.sh"
+
 MAX_ITERATIONS=25
 MODEL=""
 TASK=""
@@ -31,17 +35,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$TASK" ]]; then
-  echo "Error: provide a task description." >&2
-  echo "Example: $0 \"Add tests and fix lint — LOOP_COMPLETE when done\"" >&2
+  error_msg "provide a task description."
+  dim_line "Example: $0 \"Add tests and fix lint — LOOP_COMPLETE when done\""
   exit 1
 fi
 
 if ! command -v opencode >/dev/null 2>&1; then
-  echo "Error: opencode not found. Install: brew install anomalyco/tap/opencode" >&2
-  exit 1
+  die "opencode not found. Install: brew install anomalyco/tap/opencode"
 fi
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROMPT_FILE="$REPO_ROOT/prompts/loop.md"
 LOOP_PROMPT=$(sed "s/{{TASK}}/$TASK/" "$PROMPT_FILE")
 
@@ -50,14 +52,14 @@ if [[ -n "$MODEL" ]]; then
   MODEL_ARGS=(--model "$MODEL")
 fi
 
-echo "=== Loop start (max $MAX_ITERATIONS iterations) ==="
-echo "Task: $TASK"
+banner "Loop start (max $MAX_ITERATIONS iterations)"
+label_value "Task" "$TASK"
 echo ""
-echo "Approval-only: approve each action in the OpenCode prompt (never use --dangerously-skip-permissions)."
+dim_line "Approval-only: approve each action in the OpenCode prompt (never use --dangerously-skip-permissions)."
 echo ""
 
 for ((i=1; i<=MAX_ITERATIONS; i++)); do
-  echo "--- Iteration $i / $MAX_ITERATIONS ---"
+  section "Iteration $i / $MAX_ITERATIONS"
 
   if [[ $i -eq 1 ]]; then
     PROMPT="$LOOP_PROMPT"
@@ -75,14 +77,14 @@ for ((i=1; i<=MAX_ITERATIONS; i++)); do
 
   if grep -q 'LOOP_COMPLETE' "$OUTPUT"; then
     echo ""
-    echo "=== Loop finished (LOOP_COMPLETE) after $i iteration(s) ==="
+    success_msg "Loop finished (LOOP_COMPLETE) after $i iteration(s)"
     rm -f "$OUTPUT"
     exit 0
   fi
 
   if grep -q 'LOOP_BLOCKED' "$OUTPUT"; then
     echo ""
-    echo "=== Loop blocked by agent ==="
+    warn "Loop blocked by agent"
     rm -f "$OUTPUT"
     exit 2
   fi
@@ -90,12 +92,12 @@ for ((i=1; i<=MAX_ITERATIONS; i++)); do
   rm -f "$OUTPUT"
 
   if [[ $EXIT_CODE -ne 0 ]]; then
-    echo "Warning: opencode exited with code $EXIT_CODE" >&2
+    warn "opencode exited with code $EXIT_CODE"
   fi
 
   sleep 2
 done
 
 echo ""
-echo "=== Loop stopped: max iterations ($MAX_ITERATIONS) reached without LOOP_COMPLETE ==="
+error_msg "Loop stopped: max iterations ($MAX_ITERATIONS) reached without LOOP_COMPLETE"
 exit 1

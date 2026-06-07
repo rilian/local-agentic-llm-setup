@@ -34,5 +34,19 @@
       "label": "Qwen3.5 27B OptiQ — higher quality but tight on 24 GB at long context",
       "experimental": true
     }
+  ],
+  "watch": [
+    {
+      "hub_id": "Qwen/Qwen3.6-9B",
+      "label": "Official Qwen3.6 9B base weights (OptiQ MLX quant usually follows within days)"
+    },
+    {
+      "hub_id": "mlx-community/Qwen3.6-9B-OptiQ-4bit",
+      "label": "Qwen3.6 9B OptiQ — direct upgrade from Qwen3.5-9B on 24 GB",
+      "on_available": {
+        "rank": 55,
+        "ram_gb": 9
+      }
+    }
   ]
 }

@@ -9,6 +9,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/scripts/colors.sh"
 VENV="${REPO_ROOT}/.venv"
 PYTHON="${VENV}/bin/python"
 PLIST="${HOME}/Library/LaunchAgents/ai.local.mlx-server.plist"
@@ -34,9 +36,7 @@ if [[ "$MLX_CHAT_TEMPLATE_ARGS" != *'"'* ]]; then
   MLX_CHAT_TEMPLATE_ARGS='{"enable_thinking":false}'
 fi
 
-log()  { echo "==> $*"; }
-warn() { echo "WARNING: $*" >&2; }
-die()  { echo "ERROR: $*" >&2; exit 1; }
+# log, warn, die — scripts/colors.sh
 
 ensure_venv() {
   [[ -x "$PYTHON" ]] || die "Python venv missing — run: ./scripts/install.sh"
@@ -123,7 +123,7 @@ cmd_restart() {
 
 cmd_status() {
   if curl -sf --max-time 3 "http://${MLX_HOST}:${MLX_PORT}/v1/models" >/dev/null 2>&1; then
-    echo "MLX API:  up  http://${MLX_HOST}:${MLX_PORT}/v1"
+    printf '%b\n' "${C_GREEN}${C_BOLD}MLX API:${C_RESET}  ${C_GREEN}up${C_RESET}  http://${MLX_HOST}:${MLX_PORT}/v1"
     curl -sf "http://${MLX_HOST}:${MLX_PORT}/v1/models" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
@@ -131,22 +131,22 @@ for m in d.get('data', []):
     print('  model:', m.get('id', '?'))
 " 2>/dev/null || true
   else
-    echo "MLX API:  down  http://${MLX_HOST}:${MLX_PORT}/v1"
-    echo "  Start: ./scripts/mlx-serve.sh start"
+    printf '%b\n' "${C_RED}${C_BOLD}MLX API:${C_RESET}  ${C_RED}down${C_RESET}  http://${MLX_HOST}:${MLX_PORT}/v1"
+    dim_line "  Start: ./scripts/mlx-serve.sh start"
   fi
   if launchctl print "gui/$(id -u)/ai.local.mlx-server" >/dev/null 2>&1; then
-    echo "LaunchAgent: loaded (ai.local.mlx-server)"
+    printf '%b\n' "${C_GREEN}LaunchAgent:${C_RESET} loaded (ai.local.mlx-server)"
   else
-    echo "LaunchAgent: not loaded"
+    printf '%b\n' "${C_YELLOW}LaunchAgent:${C_RESET} not loaded"
   fi
 }
 
 cmd_logs() {
-  echo "=== stdout (${LOG_OUT}) ==="
-  tail -n 40 "$LOG_OUT" 2>/dev/null || echo "(empty)"
+  section "stdout (${LOG_OUT})"
+  tail -n 40 "$LOG_OUT" 2>/dev/null || dim_line "(empty)"
   echo ""
-  echo "=== stderr (${LOG_ERR}) ==="
-  tail -n 40 "$LOG_ERR" 2>/dev/null || echo "(empty)"
+  section "stderr (${LOG_ERR})"
+  tail -n 40 "$LOG_ERR" 2>/dev/null || dim_line "(empty)"
 }
 
 case "${1:-status}" in
