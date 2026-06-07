@@ -25,7 +25,7 @@
     "foundry": {
       "type": "remote",
       "enabled": false,
-      "url": "FOUNDRY_MCP_URL",
+      "url": "{env:FOUNDRY_MCP_URL}",
       "headers": {
         "Authorization": "Bearer {env:FOUNDRY_MCP_TOKEN}",
         "Accept": "application/json, text/event-stream"
