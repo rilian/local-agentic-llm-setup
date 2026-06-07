@@ -1,0 +1,38 @@
+{
+  "profile": "mac_24gb",
+  "ram_budget_gb": 12,
+  "note": "Agentic coding on M4 Pro 24 GB — models above ram_budget_gb are listed but not auto-selected",
+  "models": [
+    {
+      "id": "mlx-community/Qwen3.5-9B-OptiQ-4bit",
+      "rank": 50,
+      "ram_gb": 9,
+      "label": "Qwen3.5 9B OptiQ — default daily driver"
+    },
+    {
+      "id": "mlx-community/Qwen3.5-4B-OptiQ-4bit",
+      "rank": 40,
+      "ram_gb": 5,
+      "label": "Qwen3.5 4B OptiQ — lighter / more headroom"
+    },
+    {
+      "id": "mlx-community/Qwen3-14B-4bit",
+      "rank": 35,
+      "ram_gb": 9,
+      "label": "Qwen3 14B uniform 4-bit — older dense line"
+    },
+    {
+      "id": "mlx-community/Qwen3-8B-4bit",
+      "rank": 20,
+      "ram_gb": 5,
+      "label": "Qwen3 8B — legacy lighter option"
+    },
+    {
+      "id": "mlx-community/Qwen3.5-27B-OptiQ-4bit",
+      "rank": 60,
+      "ram_gb": 18,
+      "label": "Qwen3.5 27B OptiQ — higher quality but tight on 24 GB at long context",
+      "experimental": true
+    }
+  ]
+}

@@ -1,21 +1,12 @@
 #!/usr/bin/env bash
 # Local Agentic LLM — MLX + OpenCode setup (Mac Apple Silicon).
 #
-# Usage (see docs/SETUP.md):
-#   ./scripts/install.sh              Full install on a new machine
-#   ./scripts/install.sh --verify     Verify setup (~15s)
-#   ./scripts/install.sh --repair     Re-apply MLX server + OpenCode config
-#   ./scripts/install.sh --upgrade    Upgrade Python deps + OpenCode + model
-#   ./scripts/install.sh --upgrade-models  Re-download model weights
-#   ./scripts/install.sh --cleanup    Remove unused HF model cache entries
-#   ./scripts/install.sh --check      Check for available upgrades (no changes)
-# Env vars:
-#   PRIMARY_MODEL=mlx-community/Qwen3.5-9B-OptiQ-4bit
-#   MLX_PORT=8080
-#   MLX_MAX_TOKENS=8192
-#   SKIP_MODELS=1                  Upgrade: skip model re-download
-#   SKIP_BREW=1                    Upgrade: skip brew upgrades
-#   VERIFY_INFERENCE=1             Verify: slow full inference test (~1 min)
+# Usage (see README.md):
+#   ./scripts/install.sh              Full install (includes verify + HF cache cleanup)
+#   ./scripts/install.sh --upgrade    Full upgrade + repair stack (~varies)
+#   ./scripts/install.sh --upgrade --best-model   Switch to best model for 24 GB if needed
+# Optional env:
+#   PRIMARY_MODEL=mlx-community/...  Override model (--upgrade)
 
 set -euo pipefail
 
@@ -26,25 +17,21 @@ PIP="${VENV}/bin/pip"
 SERVE="${REPO_ROOT}/scripts/mlx-serve.sh"
 
 _CLI_MODEL="${PRIMARY_MODEL:-}"
-_CLI_OPENCODE_MODEL="${OPENCODE_MODEL_ID:-}"
-MLX_HOST="${MLX_HOST:-127.0.0.1}"
-MLX_PORT="${MLX_PORT:-8080}"
-MLX_MAX_TOKENS="${MLX_MAX_TOKENS:-8192}"
+DEFAULT_MODEL="mlx-community/Qwen3.5-9B-OptiQ-4bit"
+MLX_HOST="127.0.0.1"
+MLX_PORT="8080"
+MLX_MAX_TOKENS="8192"
 MLX_CHAT_TEMPLATE_ARGS='{"enable_thinking":false}'
 MLX_API_BASE="http://${MLX_HOST}:${MLX_PORT}"
-SKIP_MODELS="${SKIP_MODELS:-0}"
-SKIP_BREW="${SKIP_BREW:-0}"
-VERIFY_INFERENCE="${VERIFY_INFERENCE:-0}"
-AGENT_CONTEXT_LENGTH="${AGENT_CONTEXT_LENGTH:-32768}"
+SWITCH_BEST_MODEL="${SWITCH_BEST_MODEL:-0}"
 
 if [[ -f "$REPO_ROOT/config/models.env" ]]; then
   # shellcheck disable=SC1091
   source "$REPO_ROOT/config/models.env"
 fi
-PRIMARY_MODEL="${_CLI_MODEL:-${PRIMARY_MODEL:-mlx-community/Qwen3.5-9B-OptiQ-4bit}}"
-OPENCODE_MODEL_ID="${_CLI_OPENCODE_MODEL:-${OPENCODE_MODEL_ID:-$PRIMARY_MODEL}}"
+PRIMARY_MODEL="${_CLI_MODEL:-${PRIMARY_MODEL:-$DEFAULT_MODEL}}"
 if [[ "$PRIMARY_MODEL" != */* ]]; then
-  PRIMARY_MODEL="mlx-community/Qwen3.5-9B-OptiQ-4bit"
+  PRIMARY_MODEL="$DEFAULT_MODEL"
 fi
 if [[ "$MLX_CHAT_TEMPLATE_ARGS" != *'"'* ]]; then
   MLX_CHAT_TEMPLATE_ARGS='{"enable_thinking":false}'
@@ -96,7 +83,7 @@ PY
 configure_opencode() {
   local example="$REPO_ROOT/opencode.json.example"
   local target="${OPENCODE_CONFIG:-$HOME/.config/opencode/opencode.json}"
-  local model_for_config="${MODEL_FOR_CONFIG:-$OPENCODE_MODEL_ID}"
+  local model_for_config="$PRIMARY_MODEL"
   local existing=""
 
   [[ -f "$example" ]] || die "Missing $example"
@@ -199,7 +186,7 @@ verify_setup() {
     ok "LaunchAgent ai.local.mlx-server loaded"
   else
     fail "LaunchAgent ai.local.mlx-server not loaded"
-    echo "      Fix: ./scripts/install.sh --repair" >&2
+    echo "      Fix: ./scripts/install.sh --upgrade" >&2
   fi
 
   if curl -sf --max-time 5 "${MLX_API_BASE}/v1/models" >/dev/null 2>&1; then
@@ -256,44 +243,157 @@ PY
       ok "OpenCode config: tool_call, permissions, build agent"
     else
       fail "OpenCode config not agent-ready ($oc_check)"
-      echo "      Fix: ./scripts/install.sh --repair" >&2
+      echo "      Fix: ./scripts/install.sh --upgrade" >&2
     fi
   else
     fail "OpenCode config missing"
-    echo "      Fix: ./scripts/install.sh --repair" >&2
+    echo "      Fix: ./scripts/install.sh --upgrade" >&2
   fi
 
   if [[ "${OPENCODE_ENABLE_EXA:-}" == "1" ]] || grep -qF "OPENCODE_ENABLE_EXA=1" "${HOME}/.zshrc" 2>/dev/null; then
     ok "OPENCODE_ENABLE_EXA configured (web search)"
   else
-    warn_v "OPENCODE_ENABLE_EXA not set — run: ./scripts/install.sh --repair"
+    warn_v "OPENCODE_ENABLE_EXA not set — run: ./scripts/install.sh --upgrade"
   fi
 
-  if [[ "$VERIFY_INFERENCE" == "1" ]] && [[ "$fail" -eq 0 ]]; then
-    log "Full inference test (~30–90s on first load)..."
-    local out
-    out="$(curl -sf --max-time 300 "${MLX_API_BASE}/v1/chat/completions" \
-      -H 'Content-Type: application/json' \
-      -d "{\"model\":\"${PRIMARY_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: setup ok\"}],\"max_tokens\":64}" \
-      2>/dev/null | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-print((d.get('choices') or [{}])[0].get('message', {}).get('content', ''))
-" 2>/dev/null || true)"
-    if echo "$out" | grep -qi 'setup ok'; then
-      ok "Full inference returned content with 'setup ok'"
+  if [[ "$fail" -eq 0 ]]; then
+    log "Agent tool test (~15–60s): read README.md via tool call..."
+    local agent_result
+    agent_result="$(python3 - "$REPO_ROOT" "$PRIMARY_MODEL" "$MLX_API_BASE" <<'PY' || true
+import json, sys, urllib.error, urllib.request
+from pathlib import Path
+
+repo = Path(sys.argv[1])
+model = sys.argv[2]
+api_base = sys.argv[3].rstrip("/")
+goal_path = repo / "README.md"
+
+def step(*parts):
+    print("      " + " ".join(str(p) for p in parts), file=sys.stderr)
+
+if not goal_path.is_file():
+    print("missing:README.md")
+    sys.exit(0)
+
+goal_text = goal_path.read_text(encoding="utf-8")
+expected_line = goal_text.splitlines()[0].strip()
+step("expected heading:", expected_line)
+
+tools = [{
+    "type": "function",
+    "function": {
+        "name": "read",
+        "description": "Read a file from the project",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+    },
+}]
+
+def chat(messages):
+    body = json.dumps({
+        "model": model,
+        "messages": messages,
+        "tools": tools,
+        "max_tokens": 256,
+    }).encode()
+    req = urllib.request.Request(
+        f"{api_base}/v1/chat/completions",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=180) as resp:
+        return json.loads(resp.read())
+
+messages = [{
+    "role": "user",
+    "content": (
+        "Use the read tool to read README.md, then reply with ONLY the first line of that file. "
+        "Do not guess or invent the content."
+    ),
+}]
+
+try:
+    r1 = chat(messages)
+except urllib.error.URLError as e:
+    print(f"request_error:{e}")
+    sys.exit(0)
+except Exception as e:
+    print(f"request_error:{e}")
+    sys.exit(0)
+
+choice1 = (r1.get("choices") or [{}])[0]
+msg = choice1.get("message") or {}
+finish1 = choice1.get("finish_reason", "")
+tool_calls = msg.get("tool_calls") or []
+if not tool_calls:
+    step("turn 1 finish:", finish1)
+    if msg.get("content"):
+        step("turn 1 content:", msg.get("content"))
+    print("no_tool_call:model replied without using read tool")
+    sys.exit(0)
+
+tc = tool_calls[0]
+fn = tc.get("function") or {}
+if fn.get("name") != "read":
+    print(f"wrong_tool:{fn.get('name')}")
+    sys.exit(0)
+
+try:
+    args = json.loads(fn.get("arguments") or "{}")
+except json.JSONDecodeError:
+    print("bad_tool_args")
+    sys.exit(0)
+
+path = str(args.get("path", ""))
+if "README.md" not in path:
+    print(f"wrong_path:{path}")
+    sys.exit(0)
+
+step("turn 1 tool:", fn.get("name"), json.dumps(args))
+step("turn 1 finish:", finish1)
+
+messages.append(msg)
+messages.append({
+    "role": "tool",
+    "tool_call_id": tc.get("id") or "call_verify",
+    "content": goal_text[:4000],
+})
+
+try:
+    r2 = chat(messages)
+except Exception as e:
+    print(f"request_error_turn2:{e}")
+    sys.exit(0)
+
+choice2 = (r2.get("choices") or [{}])[0]
+content = (choice2.get("message") or {}).get("content") or ""
+step("turn 2 finish:", choice2.get("finish_reason", ""))
+step("turn 2 reply:", content)
+
+if expected_line not in content and "Local Agentic LLM" not in content:
+    print(f"bad_response:{content[:160]!r}")
+    sys.exit(0)
+
+print("ok")
+PY
+)"
+    if [[ "$agent_result" == "ok" ]]; then
+      ok "Agent tool test: read README.md via tool, quoted heading"
     else
-      fail "Full inference failed or empty (got: ${out:-empty})"
+      fail "Agent tool test failed (${agent_result:-unknown})"
     fi
   fi
 
   echo ""
   if [[ "$fail" -eq 0 ]]; then
     echo "All checks passed."
-    [[ "$VERIFY_INFERENCE" != "1" ]] && echo "Optional: VERIFY_INFERENCE=1 ./scripts/install.sh --verify"
     return 0
   fi
-  echo "Some checks failed — try: ./scripts/install.sh --repair" >&2
+  echo "Some checks failed — try: ./scripts/install.sh --upgrade" >&2
   return 1
 }
 
@@ -321,49 +421,49 @@ install_opencode_cli() {
 # Cleanup unused HF models
 # ---------------------------------------------------------------------------
 
-cmd_cleanup() {
+cleanup_hf_cache() {
   ensure_venv
-  local before after
-  before="$(du -sh "${HOME}/.cache/huggingface/hub" 2>/dev/null | awk '{print $1}' || echo unknown)"
-  log "HF cache before cleanup: ${before}"
-  "$PYTHON" - "$PRIMARY_MODEL" <<'PY'
-import os, sys, shutil
+  log "Removing unused HuggingFace model caches (keeping ${PRIMARY_MODEL})..."
+  local removed
+  removed="$("$PYTHON" - "$PRIMARY_MODEL" <<'PY' 2>&1 || true
+import sys
 from huggingface_hub import scan_cache_dir
 
 keep = sys.argv[1].replace("/", "--")
 cache = scan_cache_dir()
+removed = []
 for repo in cache.repos:
     slug = repo.repo_id.replace("/", "--")
     if slug.endswith(keep.split("--", 1)[-1]) or keep in slug:
         continue
-    print("Removing cached model:", repo.repo_id)
+    removed.append(repo.repo_id)
     for rev in repo.revisions:
         strategy = cache.delete_revisions(rev.commit_hash)
         strategy.execute()
+if removed:
+    for repo_id in removed:
+        print(repo_id)
 PY
-  after="$(du -sh "${HOME}/.cache/huggingface/hub" 2>/dev/null | awk '{print $1}' || echo unknown)"
-  echo ""
-  echo "=============================================="
-  echo " Cleanup complete"
-  echo "  HF cache: ${before} → ${after}"
-  echo "  Keep:     ${PRIMARY_MODEL}"
-  echo "=============================================="
+)"
+  if [[ -n "$removed" ]]; then
+    echo "$removed" | sed 's/^/      removed: /'
+    log "HF cache cleanup done"
+  else
+    log "HF cache: nothing to remove"
+  fi
 }
 
 # ---------------------------------------------------------------------------
 # Modes
 # ---------------------------------------------------------------------------
 
-cmd_repair() {
-  command -v brew >/dev/null || die "Homebrew required"
-  ensure_venv
-  chmod +x "$SERVE"
-  PRIMARY_MODEL="$PRIMARY_MODEL" MLX_PORT="$MLX_PORT" "$SERVE" restart || "$SERVE" start
-  export MODEL_FOR_CONFIG="$OPENCODE_MODEL_ID"
+apply_stack() {
+  chmod +x "$SERVE" "$REPO_ROOT/scripts/loop.sh" 2>/dev/null || true
+  PRIMARY_MODEL="$PRIMARY_MODEL" "$SERVE" restart || "$SERVE" start
   configure_opencode
   install_shell_env
+  [[ -f "$REPO_ROOT/config/models.env" ]] || cp "$REPO_ROOT/config/models.env.example" "$REPO_ROOT/config/models.env"
   update_models_env
-  verify_setup
 }
 
 cmd_install() {
@@ -380,17 +480,17 @@ cmd_install() {
   install_opencode_cli
   chmod +x "$SERVE" "$REPO_ROOT/scripts/loop.sh" 2>/dev/null || true
 
-  PRIMARY_MODEL="$PRIMARY_MODEL" MLX_PORT="$MLX_PORT" "$SERVE" start
+  PRIMARY_MODEL="$PRIMARY_MODEL" "$SERVE" start
 
-  export MODEL_FOR_CONFIG="$OPENCODE_MODEL_ID"
   configure_opencode
   install_shell_env
 
   [[ -f "$REPO_ROOT/config/models.env" ]] || cp "$REPO_ROOT/config/models.env.example" "$REPO_ROOT/config/models.env"
   update_models_env
 
+  cleanup_hf_cache
   log "Verifying..."
-  verify_setup || warn "Verification failed — model may still be loading; run: ./scripts/install.sh --verify"
+  verify_setup || warn "Verification failed — model may still be loading; run: ./scripts/install.sh --upgrade"
 
   echo ""
   echo "=============================================="
@@ -401,7 +501,6 @@ cmd_install() {
   echo "  OpenCode:  $(command -v opencode || echo 'not found')"
   echo ""
   echo "  source ~/.zshrc          # load OPENCODE_ENABLE_EXA"
-  echo "  ./scripts/install.sh --verify"
   echo "  ./scripts/mlx-serve.sh status"
   echo "  opencode                 # start terminal agent"
   echo "=============================================="
@@ -409,86 +508,279 @@ cmd_install() {
 
 version_line() { "$@" 2>&1 | head -1 | tr -d '\n' || echo "n/a"; }
 
-cmd_check_upgrades() {
-  command -v brew >/dev/null || die "Homebrew required"
-  local env_file="$REPO_ROOT/config/models.env"
-  echo "=== Upgrade check (no changes) ==="
-  echo ""
-  echo "--- Tools ---"
-  echo "  mlx-lm:    $( [[ -x "$PYTHON" ]] && "$PYTHON" -c "import mlx_lm; print(mlx_lm.__version__)" 2>/dev/null || echo not installed)"
-  echo "  OpenCode:  $(version_line opencode --version)"
-  echo ""
-  if [[ -x "$PIP" ]]; then
-    echo "--- Python packages (outdated) ---"
-    "$PIP" list --outdated 2>/dev/null | tail -n +3 | head -10 || echo "  (none or venv missing)"
-  fi
-  echo ""
-  echo "--- Model ---"
-  echo "  PRIMARY: ${PRIMARY_MODEL}"
-  if [[ -f "$env_file" ]]; then
-    grep -E '^(PRIMARY_DIGEST|UPGRADED_AT)=' "$env_file" 2>/dev/null | sed 's/^/  /' || true
-  fi
-  echo ""
-  echo "  HF repo: https://huggingface.co/${PRIMARY_MODEL}"
-  echo ""
-  echo "Commands:"
-  echo "  ./scripts/install.sh --upgrade"
-  echo "  ./scripts/install.sh --upgrade-models"
-  echo "  See docs/UPGRADING.md · docs/MODELS.md"
+mlx_version() {
+  [[ -x "$PYTHON" ]] && "$PYTHON" -c "
+import importlib.metadata as m
+try:
+    print(m.version('mlx'))
+except m.PackageNotFoundError:
+    print('not installed')
+" 2>/dev/null || echo "not installed"
 }
 
-cmd_upgrade_models() {
-  ensure_venv
-  download_model "$PRIMARY_MODEL"
-  PRIMARY_MODEL="$PRIMARY_MODEL" "$SERVE" restart
-  update_models_env
-  verify_setup || warn "Verification failed"
-  echo "Model upgrade complete: ${PRIMARY_MODEL}"
+mlx_lm_version() {
+  [[ -x "$PYTHON" ]] && "$PYTHON" -c "import mlx_lm; print(mlx_lm.__version__)" 2>/dev/null || echo "not installed"
+}
+
+opencode_version() {
+  command -v opencode >/dev/null 2>&1 && version_line opencode --version || echo "not installed"
+}
+
+pinned_digest() {
+  local f="$REPO_ROOT/config/models.env"
+  if [[ -f "$f" ]]; then
+    local d
+    d="$(grep '^PRIMARY_DIGEST=' "$f" 2>/dev/null | cut -d= -f2- | tr -d '\r')"
+    [[ -n "$d" ]] && { echo "$d"; return; }
+  fi
+  echo "unknown"
+}
+
+short_digest() {
+  local d="$1"
+  if [[ "$d" == "unknown" || -z "$d" ]]; then
+    echo "unknown"
+  else
+    echo "${d:0:12}"
+  fi
+}
+
+print_tool_versions() {
+  local heading="${1:-Installed versions}"
+  echo "--- ${heading} ---"
+  echo "  mlx:        $(mlx_version)"
+  echo "  mlx-lm:     $(mlx_lm_version)"
+  echo "  OpenCode:   $(opencode_version)"
+  echo "  Model:      ${PRIMARY_MODEL}"
+  echo "  HF digest:  $(short_digest "$(pinned_digest)")"
+  echo ""
+}
+
+report_version_change() {
+  local name="$1" before="$2" after="$3"
+  if [[ "$before" == "$after" ]]; then
+    echo "  ${name}:  ${after}  (unchanged)"
+  else
+    echo "  ${name}:  ${before} → ${after}"
+  fi
+}
+
+upgrade_python_deps() {
+  if [[ ! -x "$PYTHON" ]]; then
+    log "Creating Python venv at .venv..."
+    python3 -m venv "$VENV"
+  fi
+  local before_x before_m after_x after_m
+  before_x="$(mlx_version)"
+  before_m="$(mlx_lm_version)"
+  log "Upgrading Python dependencies (mlx, mlx-lm)..."
+  "$PIP" install -U pip -q
+  "$PIP" install -U -r "$REPO_ROOT/requirements.txt" -q
+  after_x="$(mlx_version)"
+  after_m="$(mlx_lm_version)"
+  report_version_change "mlx" "$before_x" "$after_x"
+  report_version_change "mlx-lm" "$before_m" "$after_m"
+}
+
+upgrade_opencode() {
+  local before after
+  before="$(opencode_version)"
+  if ! command -v opencode >/dev/null 2>&1; then
+    log "OpenCode not installed — installing..."
+    install_opencode_cli
+    after="$(opencode_version)"
+    report_version_change "OpenCode" "$before" "$after"
+    return
+  fi
+  brew tap anomalyco/tap 2>/dev/null || true
+  if brew list anomalyco/tap/opencode >/dev/null 2>&1; then
+    if brew outdated anomalyco/tap/opencode 2>/dev/null | grep -q .; then
+      log "Upgrading OpenCode (Homebrew)..."
+      brew upgrade anomalyco/tap/opencode
+    else
+      log "OpenCode already latest (Homebrew)"
+    fi
+  else
+    log "Upgrading OpenCode (opencode upgrade)..."
+    opencode upgrade || warn "opencode upgrade failed"
+  fi
+  after="$(opencode_version)"
+  report_version_change "OpenCode" "$before" "$after"
+}
+
+# Query HuggingFace + config/recommended-models.json; may set PRIMARY_MODEL.
+# Prints human-readable status on stderr; machine lines on stdout: recommended_id= should_switch=
+check_recommended_model() {
+  local catalog="$REPO_ROOT/config/recommended-models.json"
+  local pinned switch_flag="${SWITCH_BEST_MODEL:-0}"
+  pinned="$(pinned_digest)"
+  ensure_venv 2>/dev/null || true
+  "$PYTHON" - "$catalog" "$PRIMARY_MODEL" "$pinned" "$switch_flag" <<'PY'
+import json, sys
+from pathlib import Path
+
+catalog_path = Path(sys.argv[1])
+current = sys.argv[2]
+pinned = sys.argv[3]
+auto_switch = sys.argv[4] == "1"
+
+def emit(key, val):
+    print(f"{key}={val}")
+
+def step(msg):
+    print(f"      {msg}", file=sys.stderr)
+
+try:
+    from huggingface_hub import HfApi
+except ImportError:
+    step("model check skipped (huggingface_hub not installed)")
+    emit("recommended_id", current)
+    emit("should_switch", "0")
+    emit("revision_stale", "0")
+    sys.exit(0)
+
+if not catalog_path.is_file():
+    step("model check skipped (missing config/recommended-models.json)")
+    emit("recommended_id", current)
+    emit("should_switch", "0")
+    emit("revision_stale", "0")
+    sys.exit(0)
+
+catalog = json.loads(catalog_path.read_text())
+budget = catalog.get("ram_budget_gb", 12)
+models = catalog.get("models", [])
+known_ids = {m["id"] for m in models}
+fitting = [m for m in models if m.get("ram_gb", 99) <= budget and not m.get("experimental")]
+if not fitting:
+    fitting = models
+best = max(fitting, key=lambda m: m.get("rank", 0))
+recommended = best["id"]
+
+api = HfApi()
+revision_stale = False
+current_sha = ""
+current_modified = ""
+try:
+    info = api.model_info(current)
+    current_sha = info.sha or ""
+    current_modified = str(info.lastModified or "")
+    if pinned and pinned not in ("unknown", "") and current_sha and not current_sha.startswith(pinned[:12]):
+        if pinned[:12] != current_sha[:12]:
+            revision_stale = True
+except Exception as e:
+    step(f"could not fetch Hub info for {current}: {e}")
+
+step(f"profile: {catalog.get('profile', 'unknown')} (RAM budget {budget} GB for agent)")
+step(f"current:  {current}")
+if current_modified:
+    step(f"  Hub updated: {current_modified}")
+if current_sha:
+    step(f"  Hub revision: {current_sha[:12]}")
+if pinned and pinned not in ("unknown", ""):
+    step(f"  pinned:       {pinned[:12]}" + ("  (stale — re-download on upgrade)" if revision_stale else ""))
+
+rec_label = best.get("label", recommended)
+step(f"recommended for this Mac: {recommended}")
+step(f"  {rec_label}")
+
+should_switch = recommended != current
+if should_switch:
+    step(f"  → newer/better option available (rank {best.get('rank', '?')} vs current)")
+else:
+    if revision_stale:
+        step("  same model id — Hub has a newer revision (will re-sync weights)")
+    else:
+        step("  already the best fit in config/recommended-models.json")
+
+# Hub models in Qwen3.5 OptiQ family not in our catalog
+try:
+    hub = {m.id for m in api.list_models(author="mlx-community", search="Qwen3.5-OptiQ", limit=50)}
+    unknown = sorted(hub - known_ids)
+    if unknown:
+        step("  new on Hub (not in catalog — update recommended-models.json to rank):")
+        for uid in unknown[:5]:
+            step(f"    - {uid}")
+        if len(unknown) > 5:
+            step(f"    ... and {len(unknown) - 5} more")
+except Exception:
+    pass
+
+if should_switch and auto_switch:
+    step("  switching PRIMARY_MODEL (--best-model)")
+elif should_switch:
+    step("  to switch: ./scripts/install.sh --upgrade --best-model")
+
+emit("recommended_id", recommended)
+emit("should_switch", "1" if should_switch else "0")
+emit("revision_stale", "1" if revision_stale else "0")
+PY
+}
+
+apply_model_recommendation() {
+  local line recommended="" should_switch="0"
+  log "Model check (Hub + config/recommended-models.json)..."
+  while IFS= read -r line; do
+    case "$line" in
+      recommended_id=*) recommended="${line#recommended_id=}" ;;
+      should_switch=*) should_switch="${line#should_switch=}" ;;
+    esac
+  done < <(check_recommended_model)
+
+  if [[ "$should_switch" == "1" && "${SWITCH_BEST_MODEL:-0}" == "1" && -n "$recommended" ]]; then
+    if [[ "$PRIMARY_MODEL" != "$recommended" ]]; then
+      log "Switching model: $PRIMARY_MODEL → $recommended"
+      PRIMARY_MODEL="$recommended"
+      _CLI_MODEL="$recommended"
+    fi
+  fi
 }
 
 cmd_upgrade() {
   command -v brew >/dev/null || die "Homebrew required"
 
-  local before_c before_m
-  before_c="$(version_line opencode --version)"
-  before_m="$( [[ -x "$PYTHON" ]] && "$PYTHON" -c "import mlx_lm; print(mlx_lm.__version__)" 2>/dev/null || echo n/a)"
+  local before_d after_d
+  before_d="$(pinned_digest)"
 
-  if [[ "$SKIP_BREW" != "1" ]]; then
-    brew tap anomalyco/tap 2>/dev/null || true
-    if brew list anomalyco/tap/opencode >/dev/null 2>&1 && brew outdated anomalyco/tap/opencode 2>/dev/null | grep -q .; then
-      log "Upgrading opencode..."
-      brew upgrade anomalyco/tap/opencode
-    fi
-    if command -v opencode >/dev/null && ! brew list anomalyco/tap/opencode >/dev/null 2>&1; then
-      opencode upgrade || warn "opencode upgrade failed"
-    fi
-  fi
+  echo "=============================================="
+  echo " Upgrade"
+  echo "=============================================="
+  print_tool_versions "Before"
 
-  ensure_venv
-  [[ "$SKIP_MODELS" != "1" ]] && download_model "$PRIMARY_MODEL"
-  PRIMARY_MODEL="$PRIMARY_MODEL" "$SERVE" restart
+  echo "--- Upgrading ---"
+  upgrade_python_deps
+  upgrade_opencode
+  apply_model_recommendation
+  log "Refreshing model weights (${PRIMARY_MODEL})..."
+  download_model "$PRIMARY_MODEL"
 
-  export MODEL_FOR_CONFIG="$OPENCODE_MODEL_ID"
-  configure_opencode
-  install_shell_env
-  update_models_env
-  verify_setup || warn "Verification failed — run: ./scripts/install.sh --repair"
+  log "Repairing stack (server, OpenCode, launchd)..."
+  apply_stack
+  cleanup_hf_cache
+  after_d="$(pinned_digest)"
+  log "Verifying..."
+  verify_setup || warn "Verification failed — run: ./scripts/install.sh --upgrade"
 
   echo ""
+  echo "--- After ---"
+  print_tool_versions "Installed versions"
+  report_version_change "HF digest" "$(short_digest "$before_d")" "$(short_digest "$after_d")"
   echo "=============================================="
-  echo " Upgrade complete"
-  echo "  mlx-lm:    $before_m → $( [[ -x "$PYTHON" ]] && "$PYTHON" -c "import mlx_lm; print(mlx_lm.__version__)" 2>/dev/null || echo n/a)"
-  echo "  OpenCode:  $before_c → $(version_line opencode --version)"
+  echo "Upgrade complete."
   echo "=============================================="
 }
 
 case "${1:-}" in
-  --verify)         verify_setup ;;
-  --repair)         cmd_repair ;;
-  --upgrade)        cmd_upgrade ;;
-  --upgrade-models) cmd_upgrade_models ;;
-  --check)          cmd_check_upgrades ;;
-  --cleanup)        cmd_cleanup ;;
+  --upgrade)
+    shift
+    SWITCH_BEST_MODEL=0
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --best-model) SWITCH_BEST_MODEL=1; shift ;;
+        *) die "Unknown option for --upgrade: $1 (try --best-model)" ;;
+      esac
+    done
+    cmd_upgrade
+    ;;
   -h|--help)
     sed -n '2,18p' "$0"
     ;;

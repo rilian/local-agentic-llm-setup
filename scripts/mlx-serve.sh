@@ -4,12 +4,7 @@
 # Usage:
 #   ./scripts/mlx-serve.sh start|stop|restart|status|logs
 #
-# Env (or config/models.env):
-#   PRIMARY_MODEL=mlx-community/Qwen3.5-9B-OptiQ-4bit
-#   MLX_HOST=127.0.0.1
-#   MLX_PORT=8080
-#   MLX_MAX_TOKENS=8192
-#   MLX_CHAT_TEMPLATE_ARGS='{"enable_thinking":false}'
+# Optional: PRIMARY_MODEL=mlx-community/... (or set in config/models.env)
 
 set -euo pipefail
 
@@ -21,18 +16,19 @@ LOG_OUT="/tmp/mlx-server.log"
 LOG_ERR="/tmp/mlx-server.err"
 
 _CLI_MODEL="${PRIMARY_MODEL:-}"
-MLX_HOST="${MLX_HOST:-127.0.0.1}"
-MLX_PORT="${MLX_PORT:-8080}"
-MLX_MAX_TOKENS="${MLX_MAX_TOKENS:-8192}"
+DEFAULT_MODEL="mlx-community/Qwen3.5-9B-OptiQ-4bit"
+MLX_HOST="127.0.0.1"
+MLX_PORT="8080"
+MLX_MAX_TOKENS="8192"
 MLX_CHAT_TEMPLATE_ARGS='{"enable_thinking":false}'
 
 if [[ -f "$REPO_ROOT/config/models.env" ]]; then
   # shellcheck disable=SC1091
   source "$REPO_ROOT/config/models.env"
 fi
-PRIMARY_MODEL="${_CLI_MODEL:-${PRIMARY_MODEL:-mlx-community/Qwen3.5-9B-OptiQ-4bit}}"
+PRIMARY_MODEL="${_CLI_MODEL:-${PRIMARY_MODEL:-$DEFAULT_MODEL}}"
 if [[ "$PRIMARY_MODEL" != */* ]]; then
-  PRIMARY_MODEL="mlx-community/Qwen3.5-9B-OptiQ-4bit"
+  PRIMARY_MODEL="$DEFAULT_MODEL"
 fi
 if [[ "$MLX_CHAT_TEMPLATE_ARGS" != *'"'* ]]; then
   MLX_CHAT_TEMPLATE_ARGS='{"enable_thinking":false}'
