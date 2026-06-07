@@ -1,4 +1,4 @@
-# Local Agentic LLM (Mac M4 Pro)
+# Local Agentic LLM (Mac M4 Pro 24 GB)
 
 Terminal-first **local coding agent** on Apple Silicon: **OpenCode** + native **MLX** (`mlx-lm` server) + `./scripts/loop.sh`.
 
