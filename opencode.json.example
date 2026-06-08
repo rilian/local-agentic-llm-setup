@@ -54,6 +54,9 @@
       "oauth": {}
     }
   },
+  "experimental": {
+    "continue_loop_on_deny": true
+  },
   "permission": {
     "read": "allow",
     "grep": "allow",
@@ -75,7 +78,7 @@
       "ls *": "allow",
       "pwd": "allow",
       "cd *": "allow",
-      "find *": "allow",
+      "find *": "ask",
       "tree *": "allow",
       "cat *": "allow",
       "echo *": "allow",
