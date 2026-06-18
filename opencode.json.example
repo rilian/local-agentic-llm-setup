@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "mlx/mlx-community/Qwen3.5-9B-OptiQ-4bit",
+  "model": "mlx/mlx-community/Qwen3-8B-4bit",
   "default_agent": "build",
   "provider": {
     "mlx": {
@@ -12,8 +12,8 @@
         "timeout": 600000
       },
       "models": {
-        "mlx-community/Qwen3.5-9B-OptiQ-4bit": {
-          "name": "Qwen3.5 9B OptiQ 4-bit MLX (default)",
+        "mlx-community/Qwen3-8B-4bit": {
+          "name": "Qwen3 8B 4-bit (MLX)",
           "tool_call": true,
           "context_length": 32768,
           "max_tokens": 8192

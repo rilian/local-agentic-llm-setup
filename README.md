@@ -1,12 +1,12 @@
 # Local Agentic LLM (Mac M4 Pro 24 GB)
 
-Terminal-first **local coding agent** on Apple Silicon: **OpenCode** + native **MLX** (`mlx-lm` server) + `./scripts/loop.sh`.
+Terminal-first **local coding agent** on Apple Silicon: **OpenCode** + **Rapid-MLX** inference server + `./scripts/loop.sh`.
 
 - **Privacy-first** — models run locally via `http://127.0.0.1:8080/v1`
 - **Approval-only** — never use `--dangerously-skip-permissions`
 - **Hardware:** M4 Pro, 24 GB RAM (tuned for this machine)
 
-**Default model:** [`mlx-community/Qwen3.5-9B-OptiQ-4bit`](https://huggingface.co/mlx-community/Qwen3.5-9B-OptiQ-4bit) (~7 GB disk, ~9 GB RAM, 32k context)
+**Default model:** [`mlx-community/Qwen3-8B-4bit`](https://huggingface.co/mlx-community/Qwen3-8B-4bit) (~5 GB disk, ~5 GB RAM, 32k context)
 
 ---
 
@@ -18,7 +18,7 @@ Terminal
 └── ./scripts/loop.sh     # long tasks with LOOP_COMPLETE
          │
          ▼
-mlx-lm server :8080/v1  ←  Qwen3.5 9B OptiQ (Apple MLX, launchd)
+Rapid-MLX server :8080/v1  ←  Qwen3 8B 4-bit (Apple MLX, launchd)
 ```
 
 Run OpenCode from your project directory: `cd myproject && opencode`.
@@ -58,7 +58,7 @@ First run downloads ~7 GB and may take 10–20 minutes. First inference loads we
 
 ## What install does
 
-1. Python venv (`.venv`) with `mlx`, `mlx-lm`, `huggingface_hub`
+1. Python venv (`.venv`) with `rapid-mlx`, `mlx`, `mlx-lm` (utilities), `huggingface_hub`
 2. Downloads the default MLX model from HuggingFace
 3. LaunchAgent `ai.local.mlx-server` on port **8080**
 4. OpenCode CLI + `~/.config/opencode/opencode.json` (MLX provider)
@@ -91,21 +91,21 @@ Switch model in session: `/models` in the OpenCode TUI.
 
 | | |
 |---|---|
-| **HuggingFace** | `mlx-community/Qwen3.5-9B-OptiQ-4bit` |
-| **OpenCode** | `mlx/mlx-community/Qwen3.5-9B-OptiQ-4bit` |
-| **Quant** | OptiQ 4-bit (agent/code tuned) |
+| **HuggingFace** | `mlx-community/Qwen3-8B-4bit` |
+| **OpenCode** | `mlx/mlx-community/Qwen3-8B-4bit` |
+| **Quant** | uniform 4-bit |
 
-**Why this model:** Qwen3.5 generation, OptiQ quant, native MLX, fits 24 GB with headroom for dev tools.
+**Why this model:** Best tool-calling reliability (F1=0.919), fast, fits comfortably in 24 GB.
 
 **Alternatives (24 GB Mac):**
 
 | Model | RAM | Notes |
 |-------|-----|-------|
-| `mlx-community/Qwen3-8B-4bit` | ~5 GB | Lighter |
-| `mlx-community/Qwen3.5-9B-OptiQ-4bit` | ~9 GB | **Default** |
-| `mlx-community/Qwen3-14B-4bit` | ~9 GB | Larger dense Qwen3 |
+| `mlx-community/Qwen3-8B-4bit` | ~5 GB | **Default** — best tool-calling |
+| `mlx-community/Qwen3.5-9B-OptiQ-4bit` | ~9 GB | Avoid — unreliable tool calls |
+| `mlx-community/Qwen3-14B-4bit` | ~9 GB | Avoid — hallucinates instead of calling tools |
 
-Server defaults (edit `scripts/mlx-serve.sh` if needed): port `8080`, max tokens `8192`, thinking mode off.
+Server defaults (edit `scripts/mlx-serve.sh` if needed): port `8080`, max tokens `8192`, thinking mode off, prefix caching on, auto tool-call parser.
 
 **Speed tips:** keep launchd server running; fresh OpenCode session for long tasks; disable unused MCPs; optional pre-warm: `curl http://127.0.0.1:8080/v1/models`.
 
@@ -114,9 +114,9 @@ Weights cache: `~/.cache/huggingface/hub/` (old models pruned automatically on i
 Every `./scripts/install.sh --upgrade` runs a **model check** against HuggingFace and `config/recommended-models.json` (ranked for **M4 Pro 24 GB** agent use):
 
 - **Current model** — Hub revision date and whether your pinned digest is stale (same model id, newer weights)
-- **Recommended** — best catalog entry that fits the 12 GB RAM budget (9B OptiQ is the default pick today)
-- **Watch** — polls Hub for models in `watch` inside `config/recommended-models.json` (currently `Qwen/Qwen3.6-9B` and `mlx-community/Qwen3.6-9B-OptiQ-4bit`); flags the moment either lands and auto-recommends the OptiQ build when available
-- **New on Hub** — Qwen3.5/3.6 OptiQ models not yet in the catalog (hint to update rankings when mlx-community ships new sizes)
+- **Recommended** — best catalog entry that fits the 12 GB RAM budget (Qwen3-8B-4bit is the default pick today)
+- **Watch** — polls Hub for models in `watch` inside `config/recommended-models.json` (currently `Qwen/Qwen3.6-9B` and `mlx-community/Qwen3.6-9B-4bit`); flags the moment either lands and auto-recommends it when available
+- **New on Hub** — Qwen3.5/3.6 models not yet in the catalog (hint to update rankings when mlx-community ships new sizes)
 
 If output says a better model is available:
 
@@ -126,7 +126,7 @@ If output says a better model is available:
 
 That switches `PRIMARY_MODEL`, downloads weights, and re-applies the stack. To pin a specific model manually: `PRIMARY_MODEL=mlx-community/... ./scripts/install.sh --upgrade`.
 
-Edit rankings in `config/recommended-models.json` when you want to adopt new Hub models (e.g. bump rank when a Qwen3.5-14B OptiQ appears).
+Edit rankings in `config/recommended-models.json` when you want to adopt new Hub models.
 
 ---
 

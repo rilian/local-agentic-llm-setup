@@ -1,3 +1,4 @@
 mlx>=0.31
 mlx-lm>=0.31
+rapid-mlx>=0.7
 huggingface_hub>=0.30

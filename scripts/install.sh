@@ -19,11 +19,10 @@ PIP="${VENV}/bin/pip"
 SERVE="${REPO_ROOT}/scripts/mlx-serve.sh"
 
 _CLI_MODEL="${PRIMARY_MODEL:-}"
-DEFAULT_MODEL="mlx-community/Qwen3.5-9B-OptiQ-4bit"
+DEFAULT_MODEL="mlx-community/Qwen3-8B-4bit"
 MLX_HOST="127.0.0.1"
 MLX_PORT="8080"
 MLX_MAX_TOKENS="8192"
-MLX_CHAT_TEMPLATE_ARGS='{"enable_thinking":false}'
 MLX_API_BASE="http://${MLX_HOST}:${MLX_PORT}"
 SWITCH_BEST_MODEL="${SWITCH_BEST_MODEL:-0}"
 
@@ -34,9 +33,6 @@ fi
 PRIMARY_MODEL="${_CLI_MODEL:-${PRIMARY_MODEL:-$DEFAULT_MODEL}}"
 if [[ "$PRIMARY_MODEL" != */* ]]; then
   PRIMARY_MODEL="$DEFAULT_MODEL"
-fi
-if [[ "$MLX_CHAT_TEMPLATE_ARGS" != *'"'* ]]; then
-  MLX_CHAT_TEMPLATE_ARGS='{"enable_thinking":false}'
 fi
 
 # log, warn, die, ok, fail, section, banner — scripts/colors.sh
@@ -62,17 +58,29 @@ ensure_venv() {
   log "Installing/upgrading MLX dependencies..."
   "$PIP" install -U pip -q
   "$PIP" install -r "$REPO_ROOT/requirements.txt" -q
-  log "mlx-lm $("$PYTHON" -c "import mlx_lm; print(mlx_lm.__version__)" 2>/dev/null || echo unknown)"
+  log "rapid-mlx $("$VENV/bin/rapid-mlx" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo unknown)"
 }
 
 download_model() {
   local model="$1"
   log "Downloading ${model} (HuggingFace → ~/.cache/huggingface)..."
-  "$PYTHON" - "$model" <<'PY'
+  "$PYTHON" -u - "$model" <<'PY'
 import sys
 from huggingface_hub import snapshot_download
-snapshot_download(sys.argv[1])
-print("Download complete:", sys.argv[1])
+from huggingface_hub.utils import enable_progress_bars
+from tqdm import tqdm
+
+enable_progress_bars()
+
+class ForcedTqdm(tqdm):
+    """Force tqdm progress bars even when stdout is not a TTY."""
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("file", sys.stderr)
+        kwargs["disable"] = False
+        super().__init__(*args, **kwargs)
+
+snapshot_download(sys.argv[1], max_workers=2, tqdm_class=ForcedTqdm)
+print("Download complete:", sys.argv[1], flush=True)
 PY
 }
 
@@ -104,8 +112,10 @@ cfg["model"] = f"mlx/{model_id}"
 cfg["provider"]["mlx"]["options"]["baseURL"] = f"{api_base.rstrip('/')}/v1"
 cfg["provider"]["mlx"]["options"]["apiKey"] = "not-needed"
 if model_id not in cfg["provider"]["mlx"]["models"]:
+    short = model_id.split("/")[-1]
+    display = short.replace("-", " ").replace("_", " ") + " (MLX)"
     cfg["provider"]["mlx"]["models"][model_id] = {
-        "name": "Qwen3.5 9B OptiQ 4-bit MLX",
+        "name": display,
         "tool_call": True,
         "context_length": 32768,
         "max_tokens": 8192,
@@ -144,15 +154,17 @@ EOF
 
 update_models_env() {
   local env_file="$REPO_ROOT/config/models.env"
-  cp "$REPO_ROOT/config/models.env.example" "$env_file"
   {
-    cat "$env_file"
+    echo "# Pinned model — written/updated by ./scripts/install.sh"
+    echo "# Override: PRIMARY_MODEL=mlx-community/... ./scripts/install.sh --upgrade"
+    echo ""
+    echo "PRIMARY_MODEL=${PRIMARY_MODEL}"
     echo "PRIMARY_DIGEST=$("$PYTHON" -c "
 from huggingface_hub import HfApi
 info = HfApi().model_info('${PRIMARY_MODEL}')
 print(info.sha or 'unknown')
 " 2>/dev/null || echo unknown)"
-    echo "MLX_LM_VERSION=$("$PYTHON" -c "import mlx_lm; print(mlx_lm.__version__)" 2>/dev/null || echo unknown)"
+    echo "RAPID_MLX_VERSION=$("$VENV/bin/rapid-mlx" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo unknown)"
     echo "OPENCODE_VERSION=$(opencode --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo unknown)"
     echo "UPGRADED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } > "${env_file}.tmp"
@@ -403,19 +415,13 @@ PY
 # ---------------------------------------------------------------------------
 
 install_opencode_cli() {
-  if command -v opencode >/dev/null 2>&1; then
-    log "OpenCode already installed: $(opencode --version 2>/dev/null || true)"
+  if opencode_version | grep -qv "not installed"; then
+    log "OpenCode already installed: $(opencode_version)"
     return 0
   fi
-  log "Installing OpenCode..."
-  if brew tap anomalyco/tap 2>/dev/null; then
-    brew install anomalyco/tap/opencode || {
-      log "brew failed; trying curl installer..."
-      curl -fsSL https://opencode.ai/install | bash
-    }
-  else
-    curl -fsSL https://opencode.ai/install | bash
-  fi
+  log "Installing OpenCode (official installer)..."
+  curl -fsSL https://opencode.ai/install | bash
+  hash -r 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------
@@ -462,11 +468,10 @@ PY
 
 apply_stack() {
   chmod +x "$SERVE" "$REPO_ROOT/scripts/loop.sh" 2>/dev/null || true
-  PRIMARY_MODEL="$PRIMARY_MODEL" "$SERVE" restart || "$SERVE" start
+  update_models_env
+  "$SERVE" restart || "$SERVE" start
   configure_opencode
   install_shell_env
-  [[ -f "$REPO_ROOT/config/models.env" ]] || cp "$REPO_ROOT/config/models.env.example" "$REPO_ROOT/config/models.env"
-  update_models_env
 }
 
 cmd_install() {
@@ -519,12 +524,18 @@ except m.PackageNotFoundError:
 " 2>/dev/null || echo "not installed"
 }
 
-mlx_lm_version() {
-  [[ -x "$PYTHON" ]] && "$PYTHON" -c "import mlx_lm; print(mlx_lm.__version__)" 2>/dev/null || echo "not installed"
+rapid_mlx_version() {
+  local bin="${VENV}/bin/rapid-mlx"
+  [[ -x "$bin" ]] && "$bin" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "not installed"
 }
 
 opencode_version() {
-  command -v opencode >/dev/null 2>&1 && version_line opencode --version || echo "not installed"
+  local bin
+  # official installer puts binary in ~/.opencode/bin which may not be in the running shell's PATH
+  for bin in "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode" "$(command -v opencode 2>/dev/null)"; do
+    [[ -x "$bin" ]] && { version_line "$bin" --version; return; }
+  done
+  echo "not installed"
 }
 
 pinned_digest() {
@@ -550,7 +561,7 @@ print_tool_versions() {
   local heading="${1:-Installed versions}"
   section "$heading"
   label_value "mlx" "$(mlx_version)"
-  label_value "mlx-lm" "$(mlx_lm_version)"
+  label_value "rapid-mlx" "$(rapid_mlx_version)"
   label_value "OpenCode" "$(opencode_version)"
   label_value "Model" "${PRIMARY_MODEL}"
   label_value "HF digest" "$(short_digest "$(pinned_digest)")"
@@ -562,16 +573,16 @@ upgrade_python_deps() {
     log "Creating Python venv at .venv..."
     python3 -m venv "$VENV"
   fi
-  local before_x before_m after_x after_m
+  local before_x before_r after_x after_r
   before_x="$(mlx_version)"
-  before_m="$(mlx_lm_version)"
-  log "Upgrading Python dependencies (mlx, mlx-lm)..."
+  before_r="$(rapid_mlx_version)"
+  log "Upgrading Python dependencies (mlx, rapid-mlx)..."
   "$PIP" install -U pip -q
   "$PIP" install -U -r "$REPO_ROOT/requirements.txt" -q
   after_x="$(mlx_version)"
-  after_m="$(mlx_lm_version)"
+  after_r="$(rapid_mlx_version)"
   report_version_change "mlx" "$before_x" "$after_x"
-  report_version_change "mlx-lm" "$before_m" "$after_m"
+  report_version_change "rapid-mlx" "$before_r" "$after_r"
 }
 
 upgrade_opencode() {
@@ -584,18 +595,9 @@ upgrade_opencode() {
     report_version_change "OpenCode" "$before" "$after"
     return
   fi
-  brew tap anomalyco/tap 2>/dev/null || true
-  if brew list anomalyco/tap/opencode >/dev/null 2>&1; then
-    if brew outdated anomalyco/tap/opencode 2>/dev/null | grep -q .; then
-      log "Upgrading OpenCode (Homebrew)..."
-      brew upgrade anomalyco/tap/opencode
-    else
-      log "OpenCode already latest (Homebrew)"
-    fi
-  else
-    log "Upgrading OpenCode (opencode upgrade)..."
-    opencode upgrade || warn "opencode upgrade failed"
-  fi
+  log "Upgrading OpenCode (latest from GitHub via official installer)..."
+  curl -fsSL https://opencode.ai/install | bash || warn "OpenCode upgrade failed"
+  hash -r 2>/dev/null || true
   after="$(opencode_version)"
   report_version_change "OpenCode" "$before" "$after"
 }
@@ -763,14 +765,16 @@ PY
 }
 
 apply_model_recommendation() {
-  local line recommended="" should_switch="0"
+  local line recommended="" should_switch="0" revision_stale="0"
   log "Model check (Hub + config/recommended-models.json)..."
   while IFS= read -r line; do
     case "$line" in
-      recommended_id=*) recommended="${line#recommended_id=}" ;;
-      should_switch=*) should_switch="${line#should_switch=}" ;;
+      recommended_id=*)  recommended="${line#recommended_id=}" ;;
+      should_switch=*)   should_switch="${line#should_switch=}" ;;
+      revision_stale=*)  revision_stale="${line#revision_stale=}" ;;
     esac
   done < <(check_recommended_model)
+  _REVISION_STALE="$revision_stale"
 
   if [[ "$should_switch" == "1" && "${SWITCH_BEST_MODEL:-0}" == "1" && -n "$recommended" ]]; then
     if [[ "$PRIMARY_MODEL" != "$recommended" ]]; then
@@ -782,10 +786,9 @@ apply_model_recommendation() {
 }
 
 cmd_upgrade() {
-  command -v brew >/dev/null || die "Homebrew required"
-
-  local before_d after_d
+  local before_d after_d model_before
   before_d="$(pinned_digest)"
+  model_before="$PRIMARY_MODEL"
 
   banner "Upgrade"
   print_tool_versions "Before"
@@ -793,9 +796,22 @@ cmd_upgrade() {
   section "Upgrading"
   upgrade_python_deps
   upgrade_opencode
+  _REVISION_STALE="0"
   apply_model_recommendation
-  log "Refreshing model weights (${PRIMARY_MODEL})..."
-  download_model "$PRIMARY_MODEL"
+
+  local hf_snapshots="${HOME}/.cache/huggingface/hub/models--${PRIMARY_MODEL//\//--}/snapshots"
+  if [[ "$PRIMARY_MODEL" != "$model_before" ]]; then
+    log "Downloading new model (${PRIMARY_MODEL})..."
+    download_model "$PRIMARY_MODEL"
+  elif [[ "${_REVISION_STALE:-0}" == "1" ]]; then
+    log "Refreshing model weights (${PRIMARY_MODEL} — Hub has newer revision)..."
+    download_model "$PRIMARY_MODEL"
+  elif [[ ! -d "$hf_snapshots" ]] || [[ -z "$(ls -A "$hf_snapshots" 2>/dev/null)" ]]; then
+    log "Downloading model (not in local cache): ${PRIMARY_MODEL}..."
+    download_model "$PRIMARY_MODEL"
+  else
+    log "Model weights already current — skipping download (${PRIMARY_MODEL})"
+  fi
 
   log "Repairing stack (server, OpenCode, launchd)..."
   apply_stack

@@ -24,7 +24,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      echo "Usage: $0 [--max N] [--model mlx/mlx-community/Qwen3.5-9B-OptiQ-4bit] \"task description\""
+      echo "Usage: $0 [--max N] [--model mlx/mlx-community/Qwen3-8B-4bit] \"task description\""
       exit 0
       ;;
     *)
@@ -41,7 +41,7 @@ if [[ -z "$TASK" ]]; then
 fi
 
 if ! command -v opencode >/dev/null 2>&1; then
-  die "opencode not found. Install: brew install anomalyco/tap/opencode"
+  die "opencode not found. Install: curl -fsSL https://opencode.ai/install | bash"
 fi
 
 PROMPT_FILE="$REPO_ROOT/prompts/loop.md"

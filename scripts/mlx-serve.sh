@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Manage the local MLX inference server (mlx-lm OpenAI-compatible API).
+# Manage the local MLX inference server (Rapid-MLX OpenAI-compatible API).
 #
 # Usage:
 #   ./scripts/mlx-serve.sh start|stop|restart|status|logs
@@ -13,16 +13,16 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$REPO_ROOT/scripts/colors.sh"
 VENV="${REPO_ROOT}/.venv"
 PYTHON="${VENV}/bin/python"
+RAPID_MLX="${VENV}/bin/rapid-mlx"
 PLIST="${HOME}/Library/LaunchAgents/ai.local.mlx-server.plist"
 LOG_OUT="/tmp/mlx-server.log"
 LOG_ERR="/tmp/mlx-server.err"
 
 _CLI_MODEL="${PRIMARY_MODEL:-}"
-DEFAULT_MODEL="mlx-community/Qwen3.5-9B-OptiQ-4bit"
+DEFAULT_MODEL="mlx-community/Qwen3-8B-4bit"
 MLX_HOST="127.0.0.1"
 MLX_PORT="8080"
 MLX_MAX_TOKENS="8192"
-MLX_CHAT_TEMPLATE_ARGS='{"enable_thinking":false}'
 
 if [[ -f "$REPO_ROOT/config/models.env" ]]; then
   # shellcheck disable=SC1091
@@ -32,14 +32,12 @@ PRIMARY_MODEL="${_CLI_MODEL:-${PRIMARY_MODEL:-$DEFAULT_MODEL}}"
 if [[ "$PRIMARY_MODEL" != */* ]]; then
   PRIMARY_MODEL="$DEFAULT_MODEL"
 fi
-if [[ "$MLX_CHAT_TEMPLATE_ARGS" != *'"'* ]]; then
-  MLX_CHAT_TEMPLATE_ARGS='{"enable_thinking":false}'
-fi
 
 # log, warn, die — scripts/colors.sh
 
 ensure_venv() {
   [[ -x "$PYTHON" ]] || die "Python venv missing — run: ./scripts/install.sh"
+  [[ -x "$RAPID_MLX" ]] || die "rapid-mlx not installed — run: ./scripts/install.sh"
 }
 
 write_plist() {
@@ -53,11 +51,8 @@ write_plist() {
   <string>ai.local.mlx-server</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${PYTHON}</string>
-    <string>-m</string>
-    <string>mlx_lm</string>
-    <string>server</string>
-    <string>--model</string>
+    <string>${RAPID_MLX}</string>
+    <string>serve</string>
     <string>${PRIMARY_MODEL}</string>
     <string>--host</string>
     <string>${MLX_HOST}</string>
@@ -65,9 +60,17 @@ write_plist() {
     <string>${MLX_PORT}</string>
     <string>--max-tokens</string>
     <string>${MLX_MAX_TOKENS}</string>
-    <string>--chat-template-args</string>
-    <string>${MLX_CHAT_TEMPLATE_ARGS}</string>
+    <string>--no-thinking</string>
+    <string>--enable-auto-tool-choice</string>
+    <string>--tool-call-parser</string>
+    <string>auto</string>
+    <string>--enable-prefix-cache</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>RAPID_MLX_TELEMETRY</key>
+    <string>0</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
