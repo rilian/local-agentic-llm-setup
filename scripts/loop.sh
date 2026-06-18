@@ -24,7 +24,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      echo "Usage: $0 [--max N] [--model mlx/mlx-community/Qwen3-8B-4bit] \"task description\""
+      echo "Usage: $0 [--max N] [--model mlx/mlx-community/Qwen3.5-4B-OptiQ-4bit] \"task description\""
       exit 0
       ;;
     *)

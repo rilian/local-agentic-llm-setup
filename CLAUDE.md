@@ -28,7 +28,7 @@ Always use these scripts for install/server/loop operations. Do not hand-roll in
 ## Architecture
 
 ```
-opencode CLI  ──►  Rapid-MLX server :8080/v1  ──►  Qwen3-8B-4bit (Apple MLX)
+opencode CLI  ──►  Rapid-MLX server :8080/v1  ──►  Qwen3.5-4B-OptiQ-4bit (Apple MLX)
      │                    ▲
      │             launchd LaunchAgent
      │             ai.local.mlx-server

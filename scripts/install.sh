@@ -19,7 +19,7 @@ PIP="${VENV}/bin/pip"
 SERVE="${REPO_ROOT}/scripts/mlx-serve.sh"
 
 _CLI_MODEL="${PRIMARY_MODEL:-}"
-DEFAULT_MODEL="mlx-community/Qwen3-8B-4bit"
+DEFAULT_MODEL="mlx-community/Qwen3.5-4B-OptiQ-4bit"
 MLX_HOST="127.0.0.1"
 MLX_PORT="8080"
 MLX_MAX_TOKENS="8192"
@@ -798,6 +798,12 @@ cmd_upgrade() {
   upgrade_opencode
   _REVISION_STALE="0"
   apply_model_recommendation
+  
+  # If CLI MODEL was specified, force use it (override recommendation)
+  if [[ -n "$_CLI_MODEL" && "$PRIMARY_MODEL" != "$_CLI_MODEL" ]]; then
+    log "Forcing model override ($_CLI_MODEL) over recommendation ($PRIMARY_MODEL)"
+    PRIMARY_MODEL=$_CLI_MODEL
+  fi
 
   local hf_snapshots="${HOME}/.cache/huggingface/hub/models--${PRIMARY_MODEL//\//--}/snapshots"
   if [[ "$PRIMARY_MODEL" != "$model_before" ]]; then

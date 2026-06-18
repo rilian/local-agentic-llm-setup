@@ -19,7 +19,7 @@ LOG_OUT="/tmp/mlx-server.log"
 LOG_ERR="/tmp/mlx-server.err"
 
 _CLI_MODEL="${PRIMARY_MODEL:-}"
-DEFAULT_MODEL="mlx-community/Qwen3-8B-4bit"
+DEFAULT_MODEL="mlx-community/Qwen3.5-4B-OptiQ-4bit"
 MLX_HOST="127.0.0.1"
 MLX_PORT="8080"
 MLX_MAX_TOKENS="8192"

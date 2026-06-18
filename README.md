@@ -6,7 +6,7 @@ Terminal-first **local coding agent** on Apple Silicon: **OpenCode** + **Rapid-M
 - **Approval-only** — never use `--dangerously-skip-permissions`
 - **Hardware:** M4 Pro, 24 GB RAM (tuned for this machine)
 
-**Default model:** [`mlx-community/Qwen3-8B-4bit`](https://huggingface.co/mlx-community/Qwen3-8B-4bit) (~5 GB disk, ~5 GB RAM, 32k context)
+**Default model:** [`mlx-community/Qwen3.5-4B-OptiQ-4bit`](https://huggingface.co/mlx-community/Qwen3.5-4B-OptiQ-4bit) (~3 GB disk, ~3 GB RAM, 32k context)
 
 ---
 
@@ -49,6 +49,7 @@ First run downloads ~7 GB and may take 10–20 minutes. First inference loads we
 | `./scripts/install.sh --upgrade --best-model` | Upgrade and switch to best model for 24 GB if catalog recommends |
 | `./scripts/mlx-serve.sh status` | Check MLX API |
 | `./scripts/mlx-serve.sh restart` | Restart MLX server |
+| `./scripts/mlx-serve.sh stop` | Stop MLX API |
 | `opencode` | Start terminal agent |
 | `./scripts/loop.sh "task"` | Long-running agent loop |
 
@@ -91,8 +92,8 @@ Switch model in session: `/models` in the OpenCode TUI.
 
 | | |
 |---|---|
-| **HuggingFace** | `mlx-community/Qwen3-8B-4bit` |
-| **OpenCode** | `mlx/mlx-community/Qwen3-8B-4bit` |
+| **HuggingFace** | `mlx-community/Qwen3.5-4B-OptiQ-4bit` |
+| **OpenCode** | `mlx/mlx-community/Qwen3.5-4B-OptiQ-4bit` |
 | **Quant** | uniform 4-bit |
 
 **Why this model:** Best tool-calling reliability (F1=0.919), fast, fits comfortably in 24 GB.
@@ -101,7 +102,7 @@ Switch model in session: `/models` in the OpenCode TUI.
 
 | Model | RAM | Notes |
 |-------|-----|-------|
-| `mlx-community/Qwen3-8B-4bit` | ~5 GB | **Default** — best tool-calling |
+| `mlx-community/Qwen3.5-4B-OptiQ-4bit` | ~3 GB | **Default** — best tool-calling |
 | `mlx-community/Qwen3.5-9B-OptiQ-4bit` | ~9 GB | Avoid — unreliable tool calls |
 | `mlx-community/Qwen3-14B-4bit` | ~9 GB | Avoid — hallucinates instead of calling tools |
 
@@ -114,7 +115,7 @@ Weights cache: `~/.cache/huggingface/hub/` (old models pruned automatically on i
 Every `./scripts/install.sh --upgrade` runs a **model check** against HuggingFace and `config/recommended-models.json` (ranked for **M4 Pro 24 GB** agent use):
 
 - **Current model** — Hub revision date and whether your pinned digest is stale (same model id, newer weights)
-- **Recommended** — best catalog entry that fits the 12 GB RAM budget (Qwen3-8B-4bit is the default pick today)
+- **Recommended** — best catalog entry that fits the 6 GB RAM budget (Qwen3.5-4B-OptiQ-4bit is the default pick today)
 - **Watch** — polls Hub for models in `watch` inside `config/recommended-models.json` (currently `Qwen/Qwen3.6-9B` and `mlx-community/Qwen3.6-9B-4bit`); flags the moment either lands and auto-recommends it when available
 - **New on Hub** — Qwen3.5/3.6 models not yet in the catalog (hint to update rankings when mlx-community ships new sizes)
 
@@ -165,7 +166,7 @@ Project-level `opencode.json` (optional) merges with global config — e.g. Foun
 | OpenCode "cannot connect" | Server not up yet — wait 30–90s after restart, or `./scripts/mlx-serve.sh status` |
 | Wrong model / config | `./scripts/install.sh --upgrade` |
 | Slow first prompt | Normal — cold load into unified memory |
-| Out of memory | `PRIMARY_MODEL=mlx-community/Qwen3-8B-4bit ./scripts/install.sh --upgrade` |
+| Out of memory | `PRIMARY_MODEL=mlx-community/Qwen3.5-4B-OptiQ-4bit ./scripts/install.sh --upgrade` |
 | HuggingFace rate limits | `export HF_TOKEN=hf_...` then `--upgrade` |
 | pip / venv broken | `rm -rf .venv && ./scripts/install.sh` |
 
