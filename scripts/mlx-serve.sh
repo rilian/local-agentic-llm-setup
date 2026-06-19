@@ -22,7 +22,8 @@ _CLI_MODEL="${PRIMARY_MODEL:-}"
 DEFAULT_MODEL="mlx-community/Qwen3.5-4B-OptiQ-4bit"
 MLX_HOST="127.0.0.1"
 MLX_PORT="8080"
-MLX_MAX_TOKENS="8192"
+MLX_MAX_TOKENS="4096"
+OPTIQ_VISION_ENABLED=false
 
 if [[ -f "$REPO_ROOT/config/models.env" ]]; then
   # shellcheck disable=SC1091
@@ -88,8 +89,10 @@ EOF
 
 wait_for_api() {
   local i
+  echo "waiting"
   for i in {1..120}; do
     if curl -sf --max-time 2 "http://${MLX_HOST}:${MLX_PORT}/v1/models" >/dev/null 2>&1; then
+      echo "${i}..."
       return 0
     fi
     sleep 2

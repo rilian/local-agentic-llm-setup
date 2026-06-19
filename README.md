@@ -36,7 +36,7 @@ chmod +x scripts/install.sh scripts/loop.sh scripts/mlx-serve.sh
 ./scripts/install.sh
 ```
 
-First run downloads ~7 GB and may take 10–20 minutes. First inference loads weights into RAM (~30–90s).
+First run downloads ~4 GB and may take 10–20 minutes. First inference loads weights into RAM (~30–90s).
 
 ---
 
