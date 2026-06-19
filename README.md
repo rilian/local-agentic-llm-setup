@@ -97,13 +97,11 @@ Switch model in session: `/models` in the OpenCode TUI.
 
 **Why this model:** Best tool-calling reliability (F1=0.919), fast, fits comfortably in 24 GB.
 
-**Alternatives (24 GB Mac):**
+**Recommended model for 24 GB Mac:**
 
 | Model | RAM | Notes |
 |-------|-----|-------|
 | `mlx-community/Qwen3.5-4B-OptiQ-4bit` | ~3 GB | **Default** — best tool-calling |
-| `mlx-community/Qwen3.5-9B-OptiQ-4bit` | ~9 GB | Avoid — unreliable tool calls |
-| `mlx-community/Qwen3-14B-4bit` | ~9 GB | Avoid — hallucinates instead of calling tools |
 
 Server defaults (edit `scripts/mlx-serve.sh` if needed): port `8080`, max tokens `16384`, thinking mode off, prefix caching on, auto tool-call parser.
 
