@@ -57,24 +57,17 @@ config/models.env                 (auto-generated, tracks pinned model + digest 
 
 ## OpenCode config
 
-**Observability settings** in `opencode.json.example`:
-- **`logging.level: "debug"`** — detailed logs for all operations
-- **`logging.log_tokens: true`** — track input/output token counts
-- **`logging.log_inference_time: true`** — measure inference latency
-- **`logging.log_api_calls: true`** — log all API requests/responses
-- **`observability.show_token_counts: true`** — display token usage in UI
-- **`observability.show_cache_stats: true`** — show KV-cache performance
-- **`observability.show_inference_stats: true`** — latency and throughput per request
+**Model settings** in `opencode.json.example`:
+- **`max_tokens: 16384`** — response budget (4× headroom vs. 32768 context window)
+- **`tool_call: true`** — enable function calling
+- **`context_length: 32768`** — model's native context window
 
-**Model behavior** (tuned for local use):
-- **`temperature: 0.3`** — low for deterministic, focused responses
-- **`top_p: 0.9`** — nucleus sampling for quality
-- **`max_tokens: 16384`** — 4× context headroom for long tasks
+For inference tuning (temperature, sampling, etc.), use Rapid-MLX server flags in `scripts/mlx-serve.sh`.
 
-**Debugging**:
-- Check `/tmp/mlx-server.log` for inference details
-- OpenCode TUI shows token counts and timing if logging enabled
-- Retry config: `max_attempts: 2` handles transient failures
+**Observability**:
+- Run with: `opencode --debug --verbose`
+- Monitor server in parallel: `./scripts/mlx-serve.sh logs --follow`
+- Logs show token counts, inference latency, memory, cache stats
 
 ## Tool use guidelines
 
