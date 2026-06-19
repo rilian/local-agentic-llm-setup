@@ -1,4 +1,4 @@
-# Shared terminal colors for install / mlx-serve / loop scripts.
+# Shared terminal colors for install / server / loop scripts.
 # Respects NO_COLOR and non-TTY output (piped logs stay plain).
 
 if [[ -n "${LLM_COLORS_LOADED:-}" ]]; then

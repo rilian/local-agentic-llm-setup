@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Manage the local MLX inference server (Rapid-MLX OpenAI-compatible API).
+# Manage the local Rapid-MLX inference server (OpenAI-compatible API).
 #
 # Usage:
 #   ./scripts/mlx-serve.sh start|stop|restart|status|logs
@@ -22,7 +22,7 @@ _CLI_MODEL="${PRIMARY_MODEL:-}"
 DEFAULT_MODEL="mlx-community/Qwen3.5-4B-OptiQ-4bit"
 MLX_HOST="127.0.0.1"
 MLX_PORT="8080"
-MLX_MAX_TOKENS="4096"
+MLX_MAX_TOKENS="16384"
 OPTIQ_VISION_ENABLED=false
 
 if [[ -f "$REPO_ROOT/config/models.env" ]]; then

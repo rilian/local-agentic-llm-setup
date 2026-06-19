@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local Agentic LLM — MLX + OpenCode setup (Mac Apple Silicon).
+# Local Agentic LLM — Rapid-MLX + OpenCode setup (Mac Apple Silicon).
 #
 # Usage (see README.md):
 #   ./scripts/install.sh              Full install (includes verify + HF cache cleanup)
@@ -22,7 +22,7 @@ _CLI_MODEL="${PRIMARY_MODEL:-}"
 DEFAULT_MODEL="mlx-community/Qwen3.5-4B-OptiQ-4bit"
 MLX_HOST="127.0.0.1"
 MLX_PORT="8080"
-MLX_MAX_TOKENS="8192"
+MLX_MAX_TOKENS="4096"
 MLX_API_BASE="http://${MLX_HOST}:${MLX_PORT}"
 SWITCH_BEST_MODEL="${SWITCH_BEST_MODEL:-0}"
 
@@ -38,7 +38,7 @@ fi
 # log, warn, die, ok, fail, section, banner — scripts/colors.sh
 
 # ---------------------------------------------------------------------------
-# MLX helpers
+# Rapid-MLX helpers
 # ---------------------------------------------------------------------------
 
 wait_for_mlx() {
@@ -47,7 +47,7 @@ wait_for_mlx() {
     curl -sf --max-time 3 "${MLX_API_BASE}/v1/models" >/dev/null 2>&1 && return 0
     sleep 2
   done
-  die "MLX API not responding on ${MLX_API_BASE}/v1"
+  die "Rapid-MLX API not responding on ${MLX_API_BASE}/v1"
 }
 
 ensure_venv() {
@@ -55,7 +55,7 @@ ensure_venv() {
     log "Creating Python venv at .venv..."
     python3 -m venv "$VENV"
   fi
-  log "Installing/upgrading MLX dependencies..."
+  log "Installing/upgrading Rapid-MLX and dependencies..."
   "$PIP" install -U pip -q
   "$PIP" install -r "$REPO_ROOT/requirements.txt" -q
   log "rapid-mlx $("$VENV/bin/rapid-mlx" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo unknown)"
@@ -118,7 +118,7 @@ if model_id not in cfg["provider"]["mlx"]["models"]:
         "name": display,
         "tool_call": True,
         "context_length": 32768,
-        "max_tokens": 8192,
+        "max_tokens": 4096,
     }
 if existing_path:
     try:
@@ -186,9 +186,9 @@ verify_setup() {
   fi
 
   if curl -sf --max-time 5 "${MLX_API_BASE}/v1/models" >/dev/null 2>&1; then
-    ok "MLX API responding on ${MLX_API_BASE}/v1"
+    ok "Rapid-MLX API responding on ${MLX_API_BASE}/v1"
   else
-    check_fail "MLX API not responding on ${MLX_API_BASE}/v1"
+    check_fail "Rapid-MLX API not responding on ${MLX_API_BASE}/v1"
     fix_hint "./scripts/mlx-serve.sh start"
   fi
 
@@ -434,6 +434,8 @@ cleanup_hf_cache() {
   local removed
   removed="$("$PYTHON" - "$PRIMARY_MODEL" <<'PY' 2>&1 || true
 import sys
+import shutil
+from pathlib import Path
 from huggingface_hub import scan_cache_dir
 
 keep = sys.argv[1].replace("/", "--")
@@ -447,6 +449,13 @@ for repo in cache.repos:
     for rev in repo.revisions:
         strategy = cache.delete_revisions(rev.commit_hash)
         strategy.execute()
+    # Remove empty repo directory if it still exists
+    repo_dir = Path(cache.cache_dir) / f"models--{slug}"
+    if repo_dir.exists():
+        try:
+            shutil.rmtree(repo_dir)
+        except Exception:
+            pass
 if removed:
     for repo_id in removed:
         print(repo_id)
@@ -482,27 +491,35 @@ cmd_install() {
     brew install python
   fi
 
+  echo ""
   ensure_venv
+  echo ""
   download_model "$PRIMARY_MODEL"
 
+  echo ""
   install_opencode_cli
   chmod +x "$SERVE" "$REPO_ROOT/scripts/loop.sh" 2>/dev/null || true
 
+  echo ""
   PRIMARY_MODEL="$PRIMARY_MODEL" "$SERVE" start
 
+  echo ""
   configure_opencode
   install_shell_env
 
   [[ -f "$REPO_ROOT/config/models.env" ]] || cp "$REPO_ROOT/config/models.env.example" "$REPO_ROOT/config/models.env"
+  echo ""
   update_models_env
 
+  echo ""
   cleanup_hf_cache
+  echo ""
   log "Verifying..."
   verify_setup || warn "Verification failed — model may still be loading; run: ./scripts/install.sh --upgrade"
 
   echo ""
-  banner "Setup complete (MLX + OpenCode)"
-  label_value "MLX API" "${MLX_API_BASE}/v1"
+  banner "Setup complete (Rapid-MLX + OpenCode)"
+  label_value "Rapid-MLX API" "${MLX_API_BASE}/v1"
   label_value "Model" "${PRIMARY_MODEL}"
   label_value "OpenCode" "$(command -v opencode || echo 'not found')"
   echo ""
@@ -513,16 +530,6 @@ cmd_install() {
 }
 
 version_line() { "$@" 2>&1 | head -1 | tr -d '\n' || echo "n/a"; }
-
-mlx_version() {
-  [[ -x "$PYTHON" ]] && "$PYTHON" -c "
-import importlib.metadata as m
-try:
-    print(m.version('mlx'))
-except m.PackageNotFoundError:
-    print('not installed')
-" 2>/dev/null || echo "not installed"
-}
 
 rapid_mlx_version() {
   local bin="${VENV}/bin/rapid-mlx"
@@ -560,7 +567,6 @@ short_digest() {
 print_tool_versions() {
   local heading="${1:-Installed versions}"
   section "$heading"
-  label_value "mlx" "$(mlx_version)"
   label_value "rapid-mlx" "$(rapid_mlx_version)"
   label_value "OpenCode" "$(opencode_version)"
   label_value "Model" "${PRIMARY_MODEL}"
@@ -573,15 +579,12 @@ upgrade_python_deps() {
     log "Creating Python venv at .venv..."
     python3 -m venv "$VENV"
   fi
-  local before_x before_r after_x after_r
-  before_x="$(mlx_version)"
+  local before_r after_r
   before_r="$(rapid_mlx_version)"
-  log "Upgrading Python dependencies (mlx, rapid-mlx)..."
+  log "Upgrading Python dependencies (rapid-mlx)..."
   "$PIP" install -U pip -q
   "$PIP" install -U -r "$REPO_ROOT/requirements.txt" -q
-  after_x="$(mlx_version)"
   after_r="$(rapid_mlx_version)"
-  report_version_change "mlx" "$before_x" "$after_x"
   report_version_change "rapid-mlx" "$before_r" "$after_r"
 }
 
@@ -739,10 +742,8 @@ try:
     unknown = sorted(hub - known_ids - {e.get("hub_id") for e in watch})
     if unknown:
         step("  new on Hub (not in catalog — update recommended-models.json to rank):")
-        for uid in unknown[:5]:
+        for uid in unknown:
             step(f"    - {uid}")
-        if len(unknown) > 5:
-            step(f"    ... and {len(unknown) - 5} more")
 except Exception:
     pass
 
@@ -795,16 +796,20 @@ cmd_upgrade() {
 
   section "Upgrading"
   upgrade_python_deps
+  echo ""
   upgrade_opencode
+  echo ""
+
   _REVISION_STALE="0"
   apply_model_recommendation
-  
+
   # If CLI MODEL was specified, force use it (override recommendation)
   if [[ -n "$_CLI_MODEL" && "$PRIMARY_MODEL" != "$_CLI_MODEL" ]]; then
     log "Forcing model override ($_CLI_MODEL) over recommendation ($PRIMARY_MODEL)"
     PRIMARY_MODEL=$_CLI_MODEL
   fi
 
+  echo ""
   local hf_snapshots="${HOME}/.cache/huggingface/hub/models--${PRIMARY_MODEL//\//--}/snapshots"
   if [[ "$PRIMARY_MODEL" != "$model_before" ]]; then
     log "Downloading new model (${PRIMARY_MODEL})..."
@@ -819,9 +824,12 @@ cmd_upgrade() {
     log "Model weights already current — skipping download (${PRIMARY_MODEL})"
   fi
 
+  echo ""
   log "Repairing stack (server, OpenCode, launchd)..."
   apply_stack
+  echo ""
   cleanup_hf_cache
+  echo ""
   after_d="$(pinned_digest)"
   log "Verifying..."
   verify_setup || warn "Verification failed — run: ./scripts/install.sh --upgrade"

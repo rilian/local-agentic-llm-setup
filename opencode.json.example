@@ -5,7 +5,7 @@
   "provider": {
     "mlx": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "MLX (local)",
+      "name": "Rapid-MLX (local)",
       "options": {
         "baseURL": "http://127.0.0.1:8080/v1",
         "apiKey": "not-needed",
@@ -13,10 +13,14 @@
       },
       "models": {
         "mlx-community/Qwen3.5-4B-OptiQ-4bit": {
-          "name": "Qwen3 8B 4-bit (MLX)",
+          "name": "Qwen3.5 4B OptiQ (Rapid-MLX)",
           "tool_call": true,
           "context_length": 32768,
-          "max_tokens": 8192
+          "max_tokens": 16384,
+          "temperature": 0.3,
+          "top_p": 0.9,
+          "frequency_penalty": 0.1,
+          "presence_penalty": 0.1
         }
       }
     }
@@ -56,6 +60,32 @@
   },
   "experimental": {
     "continue_loop_on_deny": true
+  },
+  "agent_config": {
+    "logging": {
+      "level": "debug",
+      "verbose_errors": true,
+      "log_tokens": true,
+      "log_token_usage": true,
+      "log_failures": true,
+      "log_inference_time": true,
+      "log_api_calls": true
+    },
+    "reasoning": {
+      "effort": "medium"
+    },
+    "retry": {
+      "max_attempts": 2,
+      "backoff_ms": 1000,
+      "timeout_ms": 600000
+    },
+    "observability": {
+      "show_prompt_length": true,
+      "show_response_length": true,
+      "show_token_counts": true,
+      "show_cache_stats": true,
+      "show_inference_stats": true
+    }
   },
   "permission": {
     "read": "allow",

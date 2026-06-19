@@ -18,7 +18,7 @@ Terminal
 └── ./scripts/loop.sh     # long tasks with LOOP_COMPLETE
          │
          ▼
-Rapid-MLX server :8080/v1  ←  Qwen3 8B 4-bit (Apple MLX, launchd)
+Rapid-MLX server :8080/v1  ←  Qwen3.5 4B OptiQ (Apple Silicon, launchd)
 ```
 
 Run OpenCode from your project directory: `cd myproject && opencode`.
@@ -47,9 +47,9 @@ First run downloads ~4 GB and may take 10–20 minutes. First inference loads we
 | `./scripts/install.sh` | Full install — includes verify + HF cache cleanup |
 | `./scripts/install.sh --upgrade` | Full upgrade + repair (deps, OpenCode, model, verify, cleanup) |
 | `./scripts/install.sh --upgrade --best-model` | Upgrade and switch to best model for 24 GB if catalog recommends |
-| `./scripts/mlx-serve.sh status` | Check MLX API |
-| `./scripts/mlx-serve.sh restart` | Restart MLX server |
-| `./scripts/mlx-serve.sh stop` | Stop MLX API |
+| `./scripts/mlx-serve.sh status` | Check Rapid-MLX API |
+| `./scripts/mlx-serve.sh restart` | Restart Rapid-MLX server |
+| `./scripts/mlx-serve.sh stop` | Stop Rapid-MLX server |
 | `opencode` | Start terminal agent |
 | `./scripts/loop.sh "task"` | Long-running agent loop |
 
@@ -59,10 +59,10 @@ First run downloads ~4 GB and may take 10–20 minutes. First inference loads we
 
 ## What install does
 
-1. Python venv (`.venv`) with `rapid-mlx`, `mlx`, `mlx-lm` (utilities), `huggingface_hub`
-2. Downloads the default MLX model from HuggingFace
+1. Python venv (`.venv`) with `rapid-mlx` and `huggingface_hub`
+2. Downloads the default model from HuggingFace
 3. LaunchAgent `ai.local.mlx-server` on port **8080**
-4. OpenCode CLI + `~/.config/opencode/opencode.json` (MLX provider)
+4. OpenCode CLI + `~/.config/opencode/opencode.json` (Rapid-MLX provider)
 5. `OPENCODE_ENABLE_EXA=1` in `~/.zshrc` (web search)
 6. `config/models.env` — pinned model + versions
 7. Removes unused HuggingFace model caches (keeps current model)
@@ -92,9 +92,8 @@ Switch model in session: `/models` in the OpenCode TUI.
 
 | | |
 |---|---|
-| **HuggingFace** | `mlx-community/Qwen3.5-4B-OptiQ-4bit` |
-| **OpenCode** | `mlx/mlx-community/Qwen3.5-4B-OptiQ-4bit` |
-| **Quant** | uniform 4-bit |
+| **HuggingFace ID** | `mlx-community/Qwen3.5-4B-OptiQ-4bit` |
+| **Quantization** | uniform 4-bit |
 
 **Why this model:** Best tool-calling reliability (F1=0.919), fast, fits comfortably in 24 GB.
 
@@ -106,7 +105,7 @@ Switch model in session: `/models` in the OpenCode TUI.
 | `mlx-community/Qwen3.5-9B-OptiQ-4bit` | ~9 GB | Avoid — unreliable tool calls |
 | `mlx-community/Qwen3-14B-4bit` | ~9 GB | Avoid — hallucinates instead of calling tools |
 
-Server defaults (edit `scripts/mlx-serve.sh` if needed): port `8080`, max tokens `8192`, thinking mode off, prefix caching on, auto tool-call parser.
+Server defaults (edit `scripts/mlx-serve.sh` if needed): port `8080`, max tokens `16384`, thinking mode off, prefix caching on, auto tool-call parser.
 
 **Speed tips:** keep launchd server running; fresh OpenCode session for long tasks; disable unused MCPs; optional pre-warm: `curl http://127.0.0.1:8080/v1/models`.
 
@@ -116,8 +115,8 @@ Every `./scripts/install.sh --upgrade` runs a **model check** against HuggingFac
 
 - **Current model** — Hub revision date and whether your pinned digest is stale (same model id, newer weights)
 - **Recommended** — best catalog entry that fits the 6 GB RAM budget (Qwen3.5-4B-OptiQ-4bit is the default pick today)
-- **Watch** — polls Hub for models in `watch` inside `config/recommended-models.json` (currently `Qwen/Qwen3.6-9B` and `mlx-community/Qwen3.6-9B-4bit`); flags the moment either lands and auto-recommends it when available
-- **New on Hub** — Qwen3.5/3.6 models not yet in the catalog (hint to update rankings when mlx-community ships new sizes)
+- **Watch** — polls Hub for models in `watch` inside `config/recommended-models.json`; flags the moment either lands and auto-recommends it when available
+- **New on Hub** — newer Qwen models not yet in the catalog (hint to update rankings)
 
 If output says a better model is available:
 
@@ -162,10 +161,10 @@ Project-level `opencode.json` (optional) merges with global config — e.g. Foun
 
 | Problem | Fix |
 |---------|-----|
-| MLX API down | `./scripts/mlx-serve.sh status` → `restart` or `./scripts/install.sh --upgrade` |
+| Rapid-MLX API down | `./scripts/mlx-serve.sh status` → `restart` or `./scripts/install.sh --upgrade` |
 | OpenCode "cannot connect" | Server not up yet — wait 30–90s after restart, or `./scripts/mlx-serve.sh status` |
 | Wrong model / config | `./scripts/install.sh --upgrade` |
-| Slow first prompt | Normal — cold load into unified memory |
+| Slow first prompt | Normal — cold load into RAM |
 | Out of memory | `PRIMARY_MODEL=mlx-community/Qwen3.5-4B-OptiQ-4bit ./scripts/install.sh --upgrade` |
 | HuggingFace rate limits | `export HF_TOKEN=hf_...` then `--upgrade` |
 | pip / venv broken | `rm -rf .venv && ./scripts/install.sh` |

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A **local LLM + OpenCode installer** for Mac Apple Silicon (M4 Pro, 24 GB RAM). It is not application code — `.venv/` is dependencies only. The stack runs an MLX inference server locally and configures OpenCode CLI to use it.
+A **local LLM + OpenCode installer** for Mac Apple Silicon (M4 Pro, 24 GB RAM). It is not application code — `.venv/` is dependencies only. The stack runs a Rapid-MLX inference server locally and configures OpenCode CLI to use it.
 
 ## Key commands
 
@@ -14,7 +14,7 @@ A **local LLM + OpenCode installer** for Mac Apple Silicon (M4 Pro, 24 GB RAM). 
 ./scripts/install.sh --upgrade              # Repair/upgrade all components
 ./scripts/install.sh --upgrade --best-model # Same, plus auto-switch to top-ranked catalog model
 
-# MLX server (launchd-managed)
+# Rapid-MLX server (launchd-managed)
 ./scripts/mlx-serve.sh start|stop|restart|status|logs
 
 # Long-running agent tasks
@@ -28,7 +28,7 @@ Always use these scripts for install/server/loop operations. Do not hand-roll in
 ## Architecture
 
 ```
-opencode CLI  ──►  Rapid-MLX server :8080/v1  ──►  Qwen3.5-4B-OptiQ-4bit (Apple MLX)
+opencode CLI  ──►  Rapid-MLX server :8080/v1  ──►  Qwen3.5-4B-OptiQ-4bit (Apple Silicon)
      │                    ▲
      │             launchd LaunchAgent
      │             ai.local.mlx-server
@@ -37,9 +37,9 @@ opencode CLI  ──►  Rapid-MLX server :8080/v1  ──►  Qwen3.5-4B-OptiQ-
 config/models.env                 (auto-generated, tracks pinned model + digest + versions)
 ```
 
-**MLX server**: Rapid-MLX in Python venv at `.venv`, served on `http://127.0.0.1:8080/v1` (OpenAI-compatible). Logs at `/tmp/mlx-server.log` and `/tmp/mlx-server.err`. Max 8192 tokens, prefix caching on, auto tool-call parser.
+**Rapid-MLX server**: Rapid-MLX in Python venv at `.venv`, served on `http://127.0.0.1:8080/v1` (OpenAI-compatible). Logs at `/tmp/mlx-server.log` and `/tmp/mlx-server.err`. Max 16384 tokens, prefix caching on, auto tool-call parser.
 
-**install.sh** (~900 lines): orchestrates the entire lifecycle — venv + deps, model download from HuggingFace, OpenCode JSON config merge, LaunchAgent plist generation and load, full verification (health check + tool-call smoke test with `README.md`), and HF cache cleanup.
+**install.sh**: orchestrates the entire lifecycle — venv + Rapid-MLX deps, model download from HuggingFace, OpenCode JSON config merge, LaunchAgent plist generation and load, full verification (health check + tool-call smoke test with `README.md`), and HF cache cleanup.
 
 **loop.sh**: drives `opencode run --continue` in a loop. Reads prompt template from `prompts/loop.md`. Exits when agent outputs `LOOP_COMPLETE` or `LOOP_BLOCKED`.
 
@@ -55,9 +55,30 @@ config/models.env                 (auto-generated, tracks pinned model + digest 
 | `config/recommended-models.json` | Model catalog — edit to add/rank models |
 | `prompts/loop.md` | Prompt template for loop.sh |
 
+## OpenCode config
+
+**Observability settings** in `opencode.json.example`:
+- **`logging.level: "debug"`** — detailed logs for all operations
+- **`logging.log_tokens: true`** — track input/output token counts
+- **`logging.log_inference_time: true`** — measure inference latency
+- **`logging.log_api_calls: true`** — log all API requests/responses
+- **`observability.show_token_counts: true`** — display token usage in UI
+- **`observability.show_cache_stats: true`** — show KV-cache performance
+- **`observability.show_inference_stats: true`** — latency and throughput per request
+
+**Model behavior** (tuned for local use):
+- **`temperature: 0.3`** — low for deterministic, focused responses
+- **`top_p: 0.9`** — nucleus sampling for quality
+- **`max_tokens: 16384`** — 4× context headroom for long tasks
+
+**Debugging**:
+- Check `/tmp/mlx-server.log` for inference details
+- OpenCode TUI shows token counts and timing if logging enabled
+- Retry config: `max_attempts: 2` handles transient failures
+
 ## Tool use guidelines
 
 - Use **read / glob / grep** with scoped paths — not `find` or `tree` from `.`
 - Never bulk-read: `.venv/`, `.git/`, `~/.cache/huggingface/`, `opencode.json`, `config/models.env`
-- Troubleshooting: model down → `mlx-serve.sh status`; stale config → `install.sh --upgrade`
+- Troubleshooting: model down → `mlx-serve.sh status`; stale config → `install.sh --upgrade`; token limit → check logs and `agent_config.logging`
 - No `git commit`, `git push`, or `install.sh --upgrade` unless explicitly asked
