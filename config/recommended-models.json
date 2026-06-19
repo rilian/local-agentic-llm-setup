@@ -8,6 +8,12 @@
       "rank": 55,
       "ram_gb": 5,
       "label": "Qwen3.5 4B OptiQ — default pick, fits in RAM with headroom"
+    },
+    {
+      "id": "mlx-community/Qwen3.5-9B-MLX-4bit",
+      "rank": 0,
+      "ram_gb": 8,
+      "label": "Qwen3.5 9B MLX-4bit — highest rank, needs ~8GB RAM. Does not work smart on M4 Pro 24 GB"
     }
   ],
   "watch": []

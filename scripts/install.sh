@@ -443,7 +443,7 @@ cache = scan_cache_dir()
 removed = []
 for repo in cache.repos:
     slug = repo.repo_id.replace("/", "--")
-    if slug.endswith(keep.split("--", 1)[-1]) or keep in slug:
+    if slug == keep:
         continue
     removed.append(repo.repo_id)
     for rev in repo.revisions:
