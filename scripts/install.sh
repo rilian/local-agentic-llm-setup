@@ -189,7 +189,11 @@ verify_setup() {
     ok "Rapid-MLX API responding on ${MLX_API_BASE}/v1"
   else
     check_fail "Rapid-MLX API not responding on ${MLX_API_BASE}/v1"
-    fix_hint "./scripts/mlx-serve.sh start"
+    if launchctl print "gui/$(id -u)/ai.local.mlx-server" >/dev/null 2>&1; then
+      fix_hint "Server is loaded but not responding. Check logs: ./scripts/mlx-serve.sh logs"
+    else
+      fix_hint "Start the server: ./scripts/mlx-serve.sh start"
+    fi
   fi
 
   if launchctl print "gui/$(id -u)/ai.local.mlx-server" >/dev/null 2>&1; then
@@ -284,6 +288,10 @@ def step(msg, tone="dim"):
     pre = os.environ.get(key, "")
     print(f"{pre}      {msg}{reset}", file=sys.stderr)
 
+def is_connection_error(e):
+    err_msg = str(e).lower()
+    return any(x in err_msg for x in ["refused", "connection", "eof", "timeout", "resetbyp"])
+
 if not goal_path.is_file():
     print("missing:README.md")
     sys.exit(0)
@@ -332,10 +340,16 @@ messages = [{
 try:
     r1 = chat(messages)
 except urllib.error.URLError as e:
-    print(f"request_error:{e}")
+    if is_connection_error(e):
+        print(f"api_not_running:{e}")
+    else:
+        print(f"request_error:{e}")
     sys.exit(0)
 except Exception as e:
-    print(f"request_error:{e}")
+    if is_connection_error(e):
+        print(f"api_not_running:{e}")
+    else:
+        print(f"request_error:{e}")
     sys.exit(0)
 
 choice1 = (r1.get("choices") or [{}])[0]
@@ -379,7 +393,10 @@ messages.append({
 try:
     r2 = chat(messages)
 except Exception as e:
-    print(f"request_error_turn2:{e}")
+    if is_connection_error(e):
+        print(f"api_not_running_turn2:{e}")
+    else:
+        print(f"request_error_turn2:{e}")
     sys.exit(0)
 
 choice2 = (r2.get("choices") or [{}])[0]
@@ -398,6 +415,13 @@ PY
       ok "Agent tool test: read README.md via tool, quoted heading"
     else
       check_fail "Agent tool test failed (${agent_result:-unknown})"
+      if [[ "$agent_result" == api_not_running* ]]; then
+        fix_hint "Rapid-MLX API is not responding. The server may be stopped or still starting up."
+        fix_hint "Start: ./scripts/mlx-serve.sh start"
+        fix_hint "Monitor: ./scripts/mlx-serve.sh logs"
+      elif [[ "$agent_result" == request_error* ]]; then
+        fix_hint "Request to Rapid-MLX failed. Check server logs: ./scripts/mlx-serve.sh logs"
+      fi
     fi
   fi
 

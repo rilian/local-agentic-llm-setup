@@ -105,8 +105,27 @@ cmd_start() {
   write_plist
   launchctl bootout "gui/$(id -u)/ai.local.mlx-server" 2>/dev/null || \
     launchctl unload "$PLIST" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || \
-    launchctl load "$PLIST"
+
+  local load_output
+  load_output=$(launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>&1)
+  local load_status=$?
+
+  if [[ $load_status -ne 0 ]]; then
+    if [[ "$load_output" == *"Load failed"* ]]; then
+      warn "Failed to load MLX service"
+      dim_line "  Error: $load_output"
+      dim_line "  This usually means the previous server process hasn't shut down yet."
+      dim_line "  Try: killall python3 && sleep 2 && ./scripts/mlx-serve.sh start"
+      return 1
+    else
+      launchctl load "$PLIST" || {
+        warn "Failed to start MLX server"
+        dim_line "  Check: ./scripts/mlx-serve.sh logs"
+        return 1
+      }
+    fi
+  fi
+
   log "MLX server starting on http://${MLX_HOST}:${MLX_PORT} (model: ${PRIMARY_MODEL})"
   if wait_for_api; then
     log "MLX API ready"
