@@ -12,6 +12,6 @@ This repo is a **local LLM + OpenCode installer** (`scripts/`, `config/`, `READM
 ## Working here
 
 - Keep output small; local context fills fast. One focused change per turn.
-- Use repo scripts: `install.sh`, `mlx-serve.sh`, `loop.sh` — don't hand-roll installs or server commands.
+- Use repo scripts: `install.sh`, `mlx-serve.sh` — don't hand-roll installs or server commands.
 - Read before editing; minimal diffs. No commit/push/upgrade/destructive commands unless asked.
 - Troubleshooting: model down → `mlx-serve.sh status`; OOM → avoid bulk scans; stale config → `install.sh --upgrade`.

@@ -500,7 +500,7 @@ PY
 # ---------------------------------------------------------------------------
 
 apply_stack() {
-  chmod +x "$SERVE" "$REPO_ROOT/scripts/loop.sh" 2>/dev/null || true
+  chmod +x "$SERVE" 2>/dev/null || true
   update_models_env
   "$SERVE" restart || "$SERVE" start
   configure_opencode
@@ -522,7 +522,7 @@ cmd_install() {
 
   echo ""
   install_opencode_cli
-  chmod +x "$SERVE" "$REPO_ROOT/scripts/loop.sh" 2>/dev/null || true
+  chmod +x "$SERVE" 2>/dev/null || true
 
   echo ""
   PRIMARY_MODEL="$PRIMARY_MODEL" "$SERVE" start

@@ -1,6 +1,6 @@
 # Local Agentic LLM (Mac M4 Pro 24 GB)
 
-Terminal-first **local coding agent** on Apple Silicon: **OpenCode** + **Rapid-MLX** inference server + `./scripts/loop.sh`.
+Terminal-first **local coding agent** on Apple Silicon: **OpenCode** + **Rapid-MLX** inference server.
 
 - **Privacy-first** — models run locally via `http://127.0.0.1:8080/v1`
 - **Approval-only** — never use `--dangerously-skip-permissions`
@@ -15,7 +15,7 @@ Terminal-first **local coding agent** on Apple Silicon: **OpenCode** + **Rapid-M
 ```
 Terminal
 ├── opencode              # interactive agent (approve each action)
-└── ./scripts/loop.sh     # long tasks with LOOP_COMPLETE
+└── terminal only
          │
          ▼
 Rapid-MLX server :8080/v1  ←  Qwen3.5 4B OptiQ (Apple Silicon, launchd)
@@ -32,7 +32,7 @@ Run OpenCode from your project directory: `cd myproject && opencode`.
 ```bash
 git clone <this-repo> ~/local-agentic-llm-setup
 cd ~/local-agentic-llm-setup
-chmod +x scripts/install.sh scripts/loop.sh scripts/mlx-serve.sh
+chmod +x scripts/install.sh scripts/mlx-serve.sh
 ./scripts/install.sh
 ```
 
@@ -51,7 +51,7 @@ First run downloads ~4 GB and may take 10–20 minutes. First inference loads we
 | `./scripts/mlx-serve.sh restart` | Restart Rapid-MLX server |
 | `./scripts/mlx-serve.sh stop` | Stop Rapid-MLX server |
 | `opencode` | Start terminal agent |
-| `./scripts/loop.sh "task"` | Long-running agent loop |
+| terminal only | Use OpenCode TUI directly |
 
 **Override model:** `PRIMARY_MODEL=mlx-community/Qwen3-14B-4bit ./scripts/install.sh --upgrade`
 
@@ -78,11 +78,7 @@ source ~/.zshrc                    # once per session (EXA env)
 opencode                           # approve edits and shell commands
 ```
 
-Long task:
-
-```bash
-./scripts/loop.sh "Refactor auth — LOOP_COMPLETE when tests pass"
-```
+Use OpenCode TUI for terminal interaction.
 
 Switch model in session: `/models` in the OpenCode TUI.
 

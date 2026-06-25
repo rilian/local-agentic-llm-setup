@@ -15,8 +15,8 @@
         "mlx-community/Qwen3.5-4B-OptiQ-4bit": {
           "name": "Qwen3.5 4B OptiQ (Rapid-MLX)",
           "tool_call": true,
-          "context_length": 32768,
-          "max_tokens": 16384
+          "context_length": 65536,
+          "max_tokens": 8192
         }
       }
     }

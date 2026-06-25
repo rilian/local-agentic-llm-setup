@@ -16,11 +16,6 @@ A **local LLM + OpenCode installer** for Mac Apple Silicon (M4 Pro, 24 GB RAM). 
 
 # Rapid-MLX server (launchd-managed)
 ./scripts/mlx-serve.sh start|stop|restart|status|logs
-
-# Long-running agent tasks
-./scripts/loop.sh "task description"        # Loops opencode run --continue; stops on LOOP_COMPLETE
-./scripts/loop.sh "task" --max 10           # Override iteration cap (default 25)
-./scripts/loop.sh "task" --model <id>       # Override model for this run
 ```
 
 Always use these scripts for install/server/loop operations. Do not hand-roll installs or server management commands.
@@ -41,7 +36,7 @@ config/models.env                 (auto-generated, tracks pinned model + digest 
 
 **install.sh**: orchestrates the entire lifecycle — venv + Rapid-MLX deps, model download from HuggingFace, OpenCode JSON config merge, LaunchAgent plist generation and load, full verification (health check + tool-call smoke test with `README.md`), and HF cache cleanup.
 
-**loop.sh**: drives `opencode run --continue` in a loop. Reads prompt template from `prompts/loop.md`. Exits when agent outputs `LOOP_COMPLETE` or `LOOP_BLOCKED`.
+
 
 **config/recommended-models.json**: ranked model catalog for the `mac_24gb` profile (12 GB RAM budget). Used by `--best-model` to auto-switch. Includes a watch list for unreleased models.
 
@@ -53,7 +48,6 @@ config/models.env                 (auto-generated, tracks pinned model + digest 
 | `opencode.json` | Live config, gitignored — written by install.sh from the example |
 | `config/models.env` | Gitignored runtime state (pinned model, digest, versions) |
 | `config/recommended-models.json` | Model catalog — edit to add/rank models |
-| `prompts/loop.md` | Prompt template for loop.sh |
 
 ## OpenCode config
 

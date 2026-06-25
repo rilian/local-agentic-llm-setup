@@ -22,7 +22,7 @@ _CLI_MODEL="${PRIMARY_MODEL:-}"
 DEFAULT_MODEL="mlx-community/Qwen3.5-4B-OptiQ-4bit"
 MLX_HOST="127.0.0.1"
 MLX_PORT="8080"
-MLX_MAX_TOKENS="16384"
+MLX_MAX_TOKENS="8192"
 OPTIQ_VISION_ENABLED=false
 
 if [[ -f "$REPO_ROOT/config/models.env" ]]; then
